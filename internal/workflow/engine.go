@@ -388,6 +388,48 @@ func (e *Engine) SetAICaseSummary(caseID, summary string) error {
 	return nil
 }
 
+// SetDocumentDraft stores the structured draft JSON for the case editor.
+func (e *Engine) SetDocumentDraft(caseID string, draft map[string]interface{}) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	c, ok := e.cases[caseID]
+	if !ok {
+		return fmt.Errorf("case not found")
+	}
+	if draft == nil {
+		c.DocumentDraft = nil
+	} else {
+		cp := make(map[string]interface{}, len(draft))
+		for k, v := range draft {
+			cp[k] = v
+		}
+		c.DocumentDraft = cp
+	}
+	c.UpdatedAt = time.Now()
+	if e.onChange != nil {
+		go e.onChange()
+	}
+	return nil
+}
+
+// SetDraftPreview stores the plain-text preview derived from the draft.
+func (e *Engine) SetDraftPreview(caseID, preview string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	c, ok := e.cases[caseID]
+	if !ok {
+		return fmt.Errorf("case not found")
+	}
+	c.DraftPreview = preview
+	c.UpdatedAt = time.Now()
+	if e.onChange != nil {
+		go e.onChange()
+	}
+	return nil
+}
+
 func (e *Engine) UpdateCase(caseID, clientName, matterType string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -444,38 +486,4 @@ func (e *Engine) evictOldest() {
 	if oldestID != "" {
 		delete(e.cases, oldestID)
 	}
-}
-
-// SetDraftPreview stores the rendered draft text (markdown/plain) for a case.
-func (e *Engine) SetDraftPreview(caseID, content string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	c, ok := e.cases[caseID]
-	if !ok {
-		return fmt.Errorf("case not found")
-	}
-	c.DraftPreview = content
-	c.UpdatedAt = time.Now()
-	if e.onChange != nil {
-		go e.onChange()
-	}
-	return nil
-}
-
-// SetDocumentDraft stores the structured draft (sections + highlights with evidence links).
-func (e *Engine) SetDocumentDraft(caseID string, draft map[string]interface{}) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	c, ok := e.cases[caseID]
-	if !ok {
-		return fmt.Errorf("case not found")
-	}
-	c.DocumentDraft = draft
-	c.UpdatedAt = time.Now()
-	if e.onChange != nil {
-		go e.onChange()
-	}
-	return nil
 }

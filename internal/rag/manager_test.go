@@ -106,7 +106,6 @@ func TestRAGStoreWritesCompactJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Pretty-printed store starts with "{\n"; compact json.Marshal does not.
 	if bytes.HasPrefix(data, []byte("{\n")) {
 		t.Error("rag_store.json appears pretty-printed; expected compact json.Marshal output")
 	}

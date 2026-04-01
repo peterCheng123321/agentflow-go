@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -153,15 +152,8 @@ func (s *Server) analyzeBatchFromOCR(docs map[string]string) batchAnalysisJSON {
 		return out
 	}
 
-	names := make([]string, 0, len(docs))
-	for name := range docs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
 	var ctxBuilder strings.Builder
-	for _, name := range names {
-		text := docs[name]
+	for name, text := range docs {
 		if !intakeTextUsable(text) {
 			continue
 		}
