@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -82,5 +83,31 @@ func TestRAGPersistence(t *testing.T) {
 	
 	if results2[0].Score == 0 {
 		t.Error("Search score is 0 after restart")
+	}
+}
+
+func TestRAGStoreWritesCompactJSON(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "rag-compact-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m := NewManager(tempDir)
+	docPath := filepath.Join(tempDir, "x.txt")
+	if err := os.WriteFile(docPath, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.IngestFile(docPath, "x.txt", nil); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tempDir, "rag_store.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pretty-printed store starts with "{\n"; compact json.Marshal does not.
+	if bytes.HasPrefix(data, []byte("{\n")) {
+		t.Error("rag_store.json appears pretty-printed; expected compact json.Marshal output")
 	}
 }

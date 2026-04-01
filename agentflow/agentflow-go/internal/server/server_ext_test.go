@@ -713,3 +713,71 @@ func TestHandleRAGSummary(t *testing.T) {
 		t.Errorf("expected 200, got %d", rr.Code)
 	}
 }
+
+func TestHandleReassignDocument(t *testing.T) {
+	tempDir := t.TempDir()
+	cfg := &config.Config{
+		DataDir:        tempDir,
+		IsAppleSilicon: false,
+		OllamaURL:      "http://localhost:11434",
+	}
+	s := New(cfg)
+
+	a := s.workflow.CreateCase("Alpha", "Civil Litigation", "src", "")
+	b := s.workflow.CreateCase("Bravo", "Civil Litigation", "src", "")
+	s.workflow.AttachDocument(a.CaseID, "memo.pdf", map[string]interface{}{"classification": "contract"})
+
+	body := `{"filename":"memo.pdf","target_case_id":"` + b.CaseID + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/cases/"+a.CaseID+"/documents/reassign", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	src, _ := s.workflow.GetCaseSnapshot(a.CaseID)
+	tgt, _ := s.workflow.GetCaseSnapshot(b.CaseID)
+	if len(src.UploadedDocuments) != 0 {
+		t.Errorf("source should have no documents, got %v", src.UploadedDocuments)
+	}
+	if len(tgt.UploadedDocuments) != 1 || tgt.UploadedDocuments[0] != "memo.pdf" {
+		t.Errorf("target documents = %v, want [memo.pdf]", tgt.UploadedDocuments)
+	}
+	var gotClass string
+	for _, row := range tgt.AIFileSummaries {
+		if fn, _ := row["filename"].(string); fn == "memo.pdf" {
+			gotClass, _ = row["classification"].(string)
+			break
+		}
+	}
+	if gotClass != "contract" {
+		t.Errorf("classification = %q, want contract", gotClass)
+	}
+}
+
+func TestHandleReassignDocumentConflict(t *testing.T) {
+	tempDir := t.TempDir()
+	cfg := &config.Config{
+		DataDir:        tempDir,
+		IsAppleSilicon: false,
+		OllamaURL:      "http://localhost:11434",
+	}
+	s := New(cfg)
+
+	a := s.workflow.CreateCase("Alpha", "Civil Litigation", "src", "")
+	b := s.workflow.CreateCase("Bravo", "Civil Litigation", "src", "")
+	s.workflow.AttachDocument(a.CaseID, "dup.pdf", nil)
+	s.workflow.AttachDocument(b.CaseID, "dup.pdf", nil)
+
+	body := `{"filename":"dup.pdf","target_case_id":"` + b.CaseID + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/cases/"+a.CaseID+"/documents/reassign", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+}

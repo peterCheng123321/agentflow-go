@@ -71,17 +71,23 @@ func New(cfg *config.Config) *Server {
 
 	switch cfg.LLMBackend {
 	case "dashscope":
-		s.llm = llm.NewProvider(cfg.ModelName, cfg.DashScopeBaseURL, cfg.DashScopeAPIKey, llm.BackendOpenAICompat)
+		s.llm = llm.NewProvider(cfg.ModelName, cfg.DashScopeBaseURL, cfg.DashScopeAPIKey, llm.BackendOpenAICompat,
+			llm.WithResponseCache(cfg.LLMCacheDir, cfg.LLMCacheEnabled))
 		s.ocr = ocr.NewEngine(cfg.OCRModelID, cfg.DashScopeBaseURL, cfg.DashScopeAPIKey, ocr.BackendOpenAICompat, cfg.MaxConcurrent, 10*time.Minute)
 	default:
-		s.llm = llm.NewProvider(cfg.ModelName, cfg.OllamaURL, "", llm.BackendOllama)
+		s.llm = llm.NewProvider(cfg.ModelName, cfg.OllamaURL, "", llm.BackendOllama,
+			llm.WithResponseCache(cfg.LLMCacheDir, cfg.LLMCacheEnabled))
 		s.ocr = ocr.NewEngine(cfg.OCRModelID, cfg.OllamaURL, "", ocr.BackendOllama, cfg.MaxConcurrent, 5*time.Minute)
 	}
 
 	os.MkdirAll(filepath.Join(cfg.DataDir, "vector_store"), 0755)
 	s.rag = rag.NewManager(filepath.Join(cfg.DataDir, "vector_store"))
 
-	s.workflow = workflow.NewEngine(cfg.MaxCases, func() {
+	maxCases := cfg.MaxCases
+	if maxCases < 1 {
+		maxCases = 200
+	}
+	s.workflow = workflow.NewEngine(maxCases, func() {
 		go s.broadcastStatus()
 	})
 
@@ -286,6 +292,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"cases":          cases,
 		"case_count":     len(cases),
 		"rag":            ragSummary,
+		"llm":            s.llm.Stats(),
 		"max_cases":      s.cfg.MaxCases,
 		"max_concurrent": s.cfg.MaxConcurrent,
 		"uptime":         time.Since(s.startTime).String(),
@@ -428,6 +435,10 @@ func (s *Server) handleCases(w http.ResponseWriter, r *http.Request) {
 	case "summarize":
 		s.handleSummarizeByID(w, r, caseID)
 	case "documents":
+		if len(parts) == 3 && parts[2] == "reassign" && r.Method == http.MethodPost {
+			s.handleReassignDocument(w, r, caseID)
+			return
+		}
 		if len(parts) >= 3 && (r.Method == http.MethodDelete || r.Method == http.MethodPost) {
 			filename := strings.Join(parts[2:], "/")
 			s.handleDeleteDocumentFromCase(w, r, caseID, filename)
@@ -442,6 +453,98 @@ func (s *Server) handleCases(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeError(w, http.StatusNotFound, "Action not found")
 	}
+}
+
+func (s *Server) handleReassignDocument(w http.ResponseWriter, r *http.Request, sourceCaseID string) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+
+	var req struct {
+		Filename     string `json:"filename"`
+		TargetCaseID string `json:"target_case_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.Filename == "" || req.TargetCaseID == "" {
+		s.writeError(w, http.StatusBadRequest, "filename and target_case_id are required")
+		return
+	}
+	if sourceCaseID == req.TargetCaseID {
+		s.writeError(w, http.StatusBadRequest, "source and target case must differ")
+		return
+	}
+
+	fn := rag.NormalizeLogicalName(req.Filename)
+
+	srcSnap, ok := s.workflow.GetCaseSnapshot(sourceCaseID)
+	if !ok {
+		s.writeError(w, http.StatusNotFound, "Case not found")
+		return
+	}
+	tgtSnap, ok := s.workflow.GetCaseSnapshot(req.TargetCaseID)
+	if !ok {
+		s.writeError(w, http.StatusNotFound, "Target case not found")
+		return
+	}
+
+	onSource := false
+	for _, d := range srcSnap.UploadedDocuments {
+		if rag.NormalizeLogicalName(d) == fn {
+			onSource = true
+			break
+		}
+	}
+	if !onSource {
+		s.writeError(w, http.StatusBadRequest, "Document not on this case")
+		return
+	}
+
+	for _, f := range tgtSnap.UploadedDocuments {
+		if rag.NormalizeLogicalName(f) == fn {
+			s.writeError(w, http.StatusConflict, "Target case already has this document")
+			return
+		}
+	}
+
+	var merge map[string]interface{}
+	for _, row := range srcSnap.AIFileSummaries {
+		if row == nil {
+			continue
+		}
+		sfn, _ := row["filename"].(string)
+		if rag.NormalizeLogicalName(sfn) != fn {
+			continue
+		}
+		merge = make(map[string]interface{})
+		for k, v := range row {
+			if k == "filename" {
+				continue
+			}
+			merge[k] = v
+		}
+		break
+	}
+
+	if err := s.workflow.DetachDocument(sourceCaseID, fn); err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(merge) > 0 {
+		s.workflow.AttachDocument(req.TargetCaseID, fn, merge)
+	} else {
+		s.workflow.AttachDocument(req.TargetCaseID, fn)
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{
+		"status":           "reassigned",
+		"source_case_id":   sourceCaseID,
+		"target_case_id":   req.TargetCaseID,
+		"filename":         fn,
+	})
 }
 
 func (s *Server) handleDeleteDocumentFromCase(w http.ResponseWriter, r *http.Request, caseID string, filename string) {
