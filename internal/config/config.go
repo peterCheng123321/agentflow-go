@@ -23,6 +23,8 @@ type Config struct {
 	LLMBackend        string // dashscope | mlx | ollama
 	DashScopeBaseURL  string
 	DashScopeAPIKey   string // never log; pass only to LLM provider
+	LLMCacheEnabled   bool
+	LLMCacheDir       string
 }
 
 func Load() *Config {
@@ -77,6 +79,16 @@ func Load() *Config {
 		ocrModelID = "qwen-vl-plus"
 	}
 
+	llmCacheEnabled := true
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AGENTFLOW_LLM_CACHE"))) {
+	case "0", "false", "off", "no":
+		llmCacheEnabled = false
+	}
+	llmCacheDir := filepath.Join(dataDir, "llm_cache")
+	if v := strings.TrimSpace(os.Getenv("AGENTFLOW_LLM_CACHE_DIR")); v != "" {
+		llmCacheDir = v
+	}
+
 	return &Config{
 		Port:             port,
 		ModelName:        modelName,
@@ -90,6 +102,8 @@ func Load() *Config {
 		LLMBackend:       llmBackend,
 		DashScopeBaseURL: dashBase,
 		DashScopeAPIKey:  dashKey,
+		LLMCacheEnabled:  llmCacheEnabled,
+		LLMCacheDir:      llmCacheDir,
 	}
 }
 

@@ -7,10 +7,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Backend selects the HTTP protocol for text generation.
@@ -34,6 +37,25 @@ type Provider struct {
 	reqCount   atomic.Int64
 	errCount   atomic.Int64
 	maxRetries int
+
+	disk        *diskCache
+	cacheHits   atomic.Uint64
+	cacheMisses atomic.Uint64
+	sf          singleflight.Group
+}
+
+// Option configures Provider construction.
+type Option func(*Provider)
+
+// WithResponseCache enables a disk-backed cache of LLM responses (same prompt+context+model+params → no API call).
+func WithResponseCache(dir string, enabled bool) Option {
+	return func(p *Provider) {
+		if !enabled || dir == "" {
+			return
+		}
+		_ = os.MkdirAll(dir, 0755)
+		p.disk = newDiskCache(dir)
+	}
 }
 
 type GenerationConfig struct {
@@ -42,7 +64,7 @@ type GenerationConfig struct {
 	Model     string // Optional model override for this specific request
 }
 
-func NewProvider(modelName, baseURL, apiKey string, backend Backend) *Provider {
+func NewProvider(modelName, baseURL, apiKey string, backend Backend, opts ...Option) *Provider {
 	baseURL = strings.TrimSuffix(strings.TrimSpace(baseURL), "/")
 	p := &Provider{
 		modelName:  modelName,
@@ -59,6 +81,9 @@ func NewProvider(modelName, baseURL, apiKey string, backend Backend) *Provider {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
+	}
+	for _, o := range opts {
+		o(p)
 	}
 
 	go func() {
@@ -129,6 +154,37 @@ func (p *Provider) Generate(prompt, context string, config GenerationConfig) (st
 
 	p.reqCount.Add(1)
 
+	if p.disk != nil {
+		key := p.cacheKeyHex(prompt, context, config)
+		if b, ok := p.disk.get(key); ok {
+			p.cacheHits.Add(1)
+			return string(b), nil
+		}
+		p.cacheMisses.Add(1)
+
+		v, err, _ := p.sf.Do(key, func() (interface{}, error) {
+			if b, ok := p.disk.get(key); ok {
+				return string(b), nil
+			}
+			s, err := p.generateUncached(prompt, context, config)
+			if err != nil {
+				return "", err
+			}
+			if err := p.disk.set(key, []byte(s)); err != nil {
+				log.Printf("[LLM] cache write: %v", err)
+			}
+			return s, nil
+		})
+		if err != nil {
+			return "", err
+		}
+		return v.(string), nil
+	}
+
+	return p.generateUncached(prompt, context, config)
+}
+
+func (p *Provider) generateUncached(prompt, context string, config GenerationConfig) (string, error) {
 	switch p.backend {
 	case BackendOpenAICompat:
 		return p.generateOpenAICompatChat(prompt, context, config)
@@ -142,7 +198,7 @@ func (p *Provider) Generate(prompt, context string, config GenerationConfig) (st
 	}
 
 	messages := []map[string]string{
-		{"role": "user", "content": fmt.Sprintf("You are a careful legal-domain assistant.\n\n--- Reference material ---\n%s\n--- End reference ---\n\nTask:\n%s", context, prompt)},
+		{"role": "user", "content": buildOllamaUserContentForKey(prompt, context)},
 	}
 
 	modelToUse := p.modelName
@@ -201,15 +257,10 @@ func (p *Provider) generateOpenAICompatChat(prompt, context string, config Gener
 		modelToUse = config.Model
 	}
 
-	userContent := fmt.Sprintf("--- Reference material ---\n%s\n--- End reference ---\n\nTask:\n%s", context, prompt)
-	const maxCloudChars = 200000
-	if len(userContent) > maxCloudChars {
-		log.Printf("[LLM] DashScope prompt truncated from %d to %d chars", len(userContent), maxCloudChars)
-		userContent = userContent[:maxCloudChars] + "\n\n[... truncated ...]\n"
-	}
+	userContent := buildOpenAICompatUserContentForKey(prompt, context)
 
 	messages := []map[string]interface{}{
-		{"role": "system", "content": "You are a careful legal-domain assistant. Follow the user's task exactly; output only what they asked for when they specify a format."},
+		{"role": "system", "content": openAISystemMessage},
 		{"role": "user", "content": userContent},
 	}
 
@@ -349,14 +400,21 @@ func (p *Provider) Unload() {
 }
 
 func (p *Provider) Stats() map[string]interface{} {
-	return map[string]interface{}{
-		"model":       p.modelName,
-		"base_url":    p.baseURL,
-		"backend":     string(p.backend),
-		"is_ready":    p.isReady,
-		"req_count":   p.reqCount.Load(),
-		"err_count":   p.errCount.Load(),
-		"last_used":   p.lastUsed.Format(time.RFC3339),
-		"max_retries": p.maxRetries,
+	out := map[string]interface{}{
+		"model":          p.modelName,
+		"base_url":       p.baseURL,
+		"backend":        string(p.backend),
+		"is_ready":       p.isReady,
+		"req_count":      p.reqCount.Load(),
+		"err_count":      p.errCount.Load(),
+		"last_used":      p.lastUsed.Format(time.RFC3339),
+		"max_retries":    p.maxRetries,
+		"cache_enabled":  p.disk != nil,
+		"cache_hits":     p.cacheHits.Load(),
+		"cache_misses":   p.cacheMisses.Load(),
 	}
+	if p.disk != nil {
+		out["cache_dir"] = p.disk.dir
+	}
+	return out
 }
