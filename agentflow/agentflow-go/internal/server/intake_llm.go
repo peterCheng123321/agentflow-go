@@ -197,6 +197,12 @@ func (s *Server) analyzeBatchFromOCR(docs map[string]string) batchAnalysisJSON {
 	payload := extractJSONObject(raw)
 	if err := json.Unmarshal([]byte(payload), &out); err != nil {
 		log.Printf("[batch-analyze] JSON parse: %v (raw: %.120q)", err, raw)
+		// Reset to avoid partial state
+		out = batchAnalysisJSON{
+			ClientName: "Unknown Client",
+			MatterType: "Civil Litigation",
+		}
+		return out
 	}
 
 	if out.ClientName == "" {

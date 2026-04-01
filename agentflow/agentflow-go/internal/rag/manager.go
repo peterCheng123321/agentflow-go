@@ -263,7 +263,7 @@ func (m *Manager) Search(query string, k int) []model.SearchResult {
 	m.cacheMu.Lock()
 	m.searchCache[query] = results
 	if len(m.searchCache) > 256 {
-		// Evict oldest
+		// Evict an arbitrary entry (map iteration order is non-deterministic in Go)
 		for key := range m.searchCache {
 			delete(m.searchCache, key)
 			break

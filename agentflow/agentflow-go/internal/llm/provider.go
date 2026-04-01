@@ -150,13 +150,18 @@ func (p *Provider) Generate(prompt, context string, config GenerationConfig) (st
 		modelToUse = config.Model
 	}
 
+	temp := config.Temp
+	if temp < 0 {
+		temp = 0.1
+	}
+
 	payload := map[string]interface{}{
 		"model":    modelToUse,
 		"messages": messages,
 		"stream":   false,
 		"options": map[string]interface{}{
 			"num_predict": config.MaxTokens,
-			"temperature": config.Temp,
+			"temperature": temp,
 		},
 	}
 
@@ -192,7 +197,7 @@ func (p *Provider) generateOpenAICompatChat(prompt, context string, config Gener
 		maxTok = 2048
 	}
 	temp := config.Temp
-	if temp <= 0 {
+	if temp < 0 {
 		temp = 0.1
 	}
 

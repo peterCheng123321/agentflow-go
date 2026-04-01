@@ -25,7 +25,7 @@
 
 ### Data Flow
 
-```
+```text
 User -> Frontend -> FastAPI -> LegalAgentMachine
                               |
                               +-> _process_*() -> LLM (Qwen2.5 MLX)
@@ -37,16 +37,16 @@ User -> Frontend -> FastAPI -> LegalAgentMachine
                               +-> wechat.send_message() -> Mock/OpenClaw
                               |
                               +-> tracker.record_*() -> SQLite (usage.db)
-```
+```text
 
 ### Workflow States (from SVG Diagram)
 
-```
+```text
 1. CLIENT_CAPTURE -> 2. INITIAL_CONTACT -> 3. CASE_EVALUATION [HITL] ->
 4. FEE_COLLECTION -> 5. GROUP_CREATION -> 6. MATERIAL_INGESTION ->
 7. DOCUMENT_GENERATION [HITL] -> 8. CLIENT_APPROVAL ->
 9. FINAL_PDF_SEND [HITL] -> 10. ARCHIVE_CLOSE
-```
+```text
 
 **HITL Gates (Human must approve before continuing):**
 - Gate 1: CASE_EVALUATION — AI legal viability analysis
@@ -165,7 +165,7 @@ The approve/reject button is the same size as "Edit Draft" and "Add Note". For t
 
 **Better:** When a state requires HITL approval, the entire state panel transforms into an approval review:
 
-```
+```text
 +---------------------------------------------+
 |  AI EVALUATION - Review Required            |
 |                                             |
@@ -177,7 +177,7 @@ The approve/reject button is the same size as "Edit Draft" and "Add Note". For t
 |  Or edit the evaluation first:              |
 |  [Edit button]                              |
 +---------------------------------------------+
-```
+```text
 
 ### 4.2 No guidance text per state
 
@@ -218,7 +218,7 @@ It's a 5-column grid of 2-letter labels. User doesn't know what each state means
 
 ## 5. ULTIMATE USER FLOW (What a non-technical lawyer actually wants)
 
-```
+```text
 A client messages the firm on WeChat:
   -> System auto-creates case, auto-sends intake template
   -> AI evaluates the case and shows the lawyer:
@@ -271,7 +271,7 @@ The lawyer NEVER:
   - Wonders "what do I do now?"
   - Sees empty panels with no data
   - Has to understand what "execute" means
-```
+```text
 
 ---
 
@@ -289,7 +289,7 @@ The lawyer NEVER:
 
 ### 6.2 Current HITL Flow (What Happens Now)
 
-```
+```text
 DAG executor runs _execute_state_node():
   1. Runs _process_* handler (generates AI output)
   2. Stores output in case["state_outputs"][state_name]
@@ -305,7 +305,7 @@ DAG executor runs _execute_state_node():
      - Sets asyncio.Event -> unblocks DAG executor
      - Records tracker.record_approval(state, true, response_time)
   6. DAG executor continues to next state
-```
+```text
 
 ### 6.3 What's Broken in This Flow
 
@@ -327,7 +327,7 @@ What lawyers actually need:
 
 **Problem 3: Edit tracking is a black hole**
 
-```python
+```textpython
 def edit_draft(self, case_id, new_draft_text):
     # Records: "edit_draft" action + case_id
     # Does NOT record:
@@ -337,7 +337,7 @@ def edit_draft(self, case_id, new_draft_text):
     #   - Which sections were modified
     #   - How many edit iterations occurred
     self.tracker.record_user_action("edit_draft", case_id)
-```
+```text
 
 **Problem 4: Rejection has no follow-through**
 
@@ -351,14 +351,14 @@ When a lawyer rejects at Gate 1 (evaluation) or Gate 2 (draft):
 **Problem 5: No multi-round HITL tracking**
 
 A real workflow involves multiple edit cycles:
-```
+```text
 AI generates draft -> Lawyer rejects -> AI regenerates -> Lawyer edits -> Lawyer approves
-```
+```text
 Currently we only track: "approval=true" at the end. We lose the entire correction history.
 
 ### 6.4 Complete HITL Edit Flow (Target Design)
 
-```
+```text
 State: DOCUMENT_GENERATION
 
 +---------------------------------------------+
@@ -400,7 +400,7 @@ Lawyer clicks APPROVE:
                    sections_edited: ["Legal Basis"]}
   - Draft is saved with lawyer's edits as final version
   - Continues to CLIENT_APPROVAL state
-```
+```text
 
 ### 6.5 Rejection Taxonomy (Structured Reasons)
 
@@ -463,7 +463,7 @@ The PII policy hashes client names and deletes all text content. This is correct
 
 ### 7.3 New Table: `llm_interactions`
 
-```sql
+```textsql
 CREATE TABLE llm_interactions (
     id INTEGER PRIMARY KEY,
     ts REAL NOT NULL,
@@ -494,11 +494,11 @@ CREATE TABLE llm_interactions (
     -- For JSONL export
     exported BOOLEAN DEFAULT FALSE
 );
-```
+```text
 
 ### 7.4 New Table: `hitl_reviews`
 
-```sql
+```textsql
 CREATE TABLE hitl_reviews (
     id INTEGER PRIMARY KEY,
     ts REAL NOT NULL,
@@ -523,19 +523,19 @@ CREATE TABLE hitl_reviews (
     -- Session
     session_id TEXT
 );
-```
+```text
 
 ### 7.5 Fine-Tuning Export Format (Qwen Chat Template)
 
 Each approved interaction becomes one training example:
 
-```jsonl
+```textjsonl
 {"messages": [
   {"role": "system", "content": "You are a professional legal assistant focused on Chinese commercial lease disputes. Answer directly in Chinese based on the provided context."},
   {"role": "user", "content": "Context: [RAG chunks]\nRequest: Please evaluate the legal viability of this case: Zhang Wei vs Landlord Co, commercial lease dispute."},
   {"role": "assistant", "content": "[LAWYER-APPROVED final text, with any lawyer edits incorporated]"}
 ]}
-```
+```text
 
 **Key principle:** The `assistant` content is ALWAYS the lawyer's final approved version — never the raw AI output. The model learns to produce what the lawyer accepted.
 
@@ -576,7 +576,7 @@ For each interaction, compute quality metrics:
 
 ### 7.8 V2 Fine-Tuning Pipeline
 
-```
+```text
 V1 Data Collection (now):
   +-- llm_interactions table captures every AI output + lawyer correction
   +-- hitl_reviews table captures approval/rejection patterns
@@ -605,7 +605,7 @@ V2 Adaptive Engine activates:
   +-- Auto-approve states when rejection_rate < 2% over 50 cases
   +-- Adjust RAG chunk sizes based on retrieval quality metrics
   +-- Re-enable OpenClaw for real WeChat integration
-```
+```text
 
 ---
 
@@ -687,14 +687,14 @@ The #1 complaint will be: "It's too slow." Here's what to optimize:
 
 Currently `generate_legal_text()` blocks until complete. For the frontend, add a streaming endpoint:
 
-```
+```text
 GET /cases/{id}/execute?stream=true
 -> Server-Sent Events:
   data: {"type": "token", "content": ""}
   data: {"type": "token", "content": ""}
   ...
   data: {"type": "done", "output_id": 42}
-```
+```text
 
 This lets the user see the AI thinking in real-time instead of staring at a spinner.
 
@@ -704,17 +704,17 @@ This lets the user see the AI thinking in real-time instead of staring at a spin
 
 ### Current SQLite Schema (usage.db)
 
-```
+```text
 events table:
   id, ts, event_type, category, payload (JSON), session_id
 
 summaries table:
   id, period_type, period_key, summary_json, created_at
-```
+```text
 
 ### New Tables Needed
 
-```
+```text
 llm_interactions table:
   id, ts, case_id_hash, state_name,
   rag_query, rag_context, llm_prompt, system_prompt, model_name, generation_params,
@@ -727,14 +727,14 @@ hitl_reviews table:
   decision, review_duration_s, rejection_reason, rejection_detail,
   edit_count, edit_char_count, edit_ratio, is_minor_edit, sections_edited,
   llm_output_id, session_id
-```
+```text
 
 ### JSONL Export (for fine-tuning)
 
-```jsonl
+```textjsonl
 {"messages": [{"role": "system", "..."}, {"role": "user", "..."}, {"role": "assistant", "..."}]}
 {"messages": [{"role": "system", "..."}, {"role": "user", "..."}, {"role": "assistant", "..."}]}
-```
+```text
 
 ### Event Categories Currently Tracked
 
