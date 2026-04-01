@@ -1,0 +1,33 @@
+# Binaries
+agentflow-go
+agentflow-go-new
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Data directory (uploaded files, secrets, vector store)
+data/
+
+# Logs
+server.log
+*.log
+
+# macOS
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temp files
+*.tmp
+*.bak

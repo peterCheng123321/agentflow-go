@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentFlow | AI Case Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['"Inter"', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        brand: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a5f' },
+                        surface: { 0:'#0b1120',1:'#111827',2:'#1e293b',3:'#334155',4:'#475569' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .glass { background: rgba(30,41,59,0.4); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.05); }
+        .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+    </style>
+</head>
+<body class="min-h-screen bg-surface-0 text-slate-200 antialiased overflow-hidden font-sans">
+    <div id="toast-container" class="fixed bottom-6 right-6 z-50 space-y-2"></div>
+
+    <div class="flex h-screen w-screen">
+        <!-- Sidebar -->
+        <aside class="w-72 flex flex-col border-r border-surface-3/30 bg-surface-1/50 backdrop-blur-xl">
+            <div class="p-6 border-b border-surface-3/20 flex items-center gap-3">
+                <div class="h-8 w-8 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-lg shadow-brand-500/20 flex items-center justify-center text-white font-bold">A</div>
+                <div>
+                    <h1 class="text-sm font-bold text-white tracking-tight">AgentFlow Go</h1>
+                    <p class="text-[10px] text-slate-500 font-medium">Apple Silicon Optimized</p>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+                <div>
+                    <div class="flex items-center justify-between mb-3 px-2">
+                        <h2 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Active Cases</h2>
+                        <span id="case-count" class="text-[10px] bg-surface-3 px-1.5 py-0.5 rounded text-slate-400">0</span>
+                    </div>
+                    
+                    <div class="px-2 mb-4">
+                        <div class="relative group">
+                            <input type="text" id="case-search" oninput="Actions.filterCases(this.value)" placeholder="Search 2,000+ cases..." 
+                                   class="w-full bg-surface-2/50 border border-surface-3/30 rounded-lg py-1.5 pl-8 pr-3 text-[10px] text-white focus:outline-none focus:ring-1 focus:ring-brand-500/50 transition-all placeholder:text-slate-600">
+                            <svg class="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-brand-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                        </div>
+                    </div>
+
+                    <div id="case-list" class="space-y-1" style="content-visibility: auto; contain-intrinsic-size: 0 500px;"></div>
+                </div>
+
+                <div>
+                    <h2 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">System Jobs</h2>
+                    <div id="job-list" class="space-y-2"></div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-surface-3/20 bg-surface-2/20">
+                <input id="sidebar-upload-input" type="file" multiple class="hidden" onchange="Actions.uploadFiles(event)">
+                <button type="button" onclick="document.getElementById('sidebar-upload-input').click()" class="w-full py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-lg shadow-brand-600/20 active:scale-95 flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                    Upload file
+                </button>
+                <p class="text-[9px] text-slate-600 text-center mt-2 px-1 leading-snug">Creates or updates a case from the document (same as case detail upload).</p>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col min-w-0 bg-surface-0 relative">
+            <!-- Top Header -->
+            <header class="h-16 border-b border-surface-3/20 px-8 flex items-center justify-between shrink-0 bg-surface-0/50 backdrop-blur-md z-10">
+                <div id="breadcrumb" class="flex items-center gap-2 text-xs text-slate-500">
+                    <span>Workspace</span>
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    <span id="header-case-id" class="text-slate-300 font-medium">No Case Selected</span>
+                </div>
+                
+                <div class="flex items-center gap-4">
+                    <div id="connection-badge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-2/50 border border-surface-3/30">
+                        <span id="conn-dot" class="h-1.5 w-1.5 rounded-full bg-yellow-500 pulse-dot"></span>
+                        <span id="conn-text" class="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Connecting</span>
+                    </div>
+                    <div class="h-4 w-px bg-surface-3/50 mx-1"></div>
+                    <button onclick="UI.openRAGSearch()" class="p-2 text-slate-400 hover:text-white transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    </button>
+                    <button onclick="UI.openSystemModal()" class="p-2 text-slate-400 hover:text-white transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Case Detail Area -->
+            <div id="detail-view" class="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                <div id="empty-state" class="h-full flex flex-col items-center justify-center text-slate-600 animate-in fade-in duration-500">
+                    <div class="h-24 w-24 rounded-3xl bg-surface-2 flex items-center justify-center mb-6">
+                        <svg class="w-12 h-12 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2 2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+                    </div>
+                    <h2 class="text-lg font-bold text-slate-400">Select a case to begin</h2>
+                    <p class="text-sm mt-2 max-w-xs text-center">Manage legal documents, track workflows, and generate AI-powered evaluation reports.</p>
+                </div>
+
+                <div id="case-content" class="hidden space-y-8 animate-in slide-in-from-bottom-4 duration-500">
+                    <!-- Case Hero -->
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <div class="flex items-center gap-3 mb-2">
+                                <h1 id="case-client" class="text-3xl font-extrabold text-white tracking-tight">--</h1>
+                                <span id="case-status-badge" class="px-2.5 py-1 rounded-md bg-brand-500/10 text-brand-400 text-[10px] font-bold uppercase tracking-wider border border-brand-500/20">--</span>
+                            </div>
+                            <p id="case-matter" class="text-slate-400 text-sm font-medium">--</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="Actions.advanceState()" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-lg shadow-brand-600/20 active:scale-95 flex items-center gap-2">
+                                Next Step
+                            </button>
+                            <button onclick="Actions.deleteCase()" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 transition-colors">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Workflow Visualizer -->
+                    <div class="relative py-8">
+                        <div class="absolute top-1/2 left-0 w-full h-0.5 bg-surface-2 -translate-y-1/2"></div>
+                        <div id="workflow-steps" class="relative flex justify-between px-4"></div>
+                    </div>
+
+                    <!-- Human-in-the-loop (blocks advancing into gated stages) -->
+                    <div id="hitl-panel" class="hidden rounded-2xl p-5 border border-amber-500/35 bg-amber-950/20 space-y-4 mb-2">
+                        <div>
+                            <h3 class="text-[10px] font-bold text-amber-300 uppercase tracking-widest">Human review</h3>
+                            <p id="hitl-panel-desc" class="text-sm text-slate-200 mt-2 leading-relaxed"></p>
+                            <p id="hitl-panel-status" class="text-[11px] text-amber-400/90 mt-2 font-medium"></p>
+                        </div>
+                        <div class="flex flex-col sm:flex-row flex-wrap gap-2 items-stretch sm:items-center">
+                            <input id="hitl-reason" type="text" autocomplete="off" placeholder="Audit note (optional)" class="flex-1 min-w-[200px] rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500/40">
+                            <button type="button" onclick="Actions.submitHITL(true)" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">Approve</button>
+                            <button type="button" onclick="Actions.submitHITL(false)" class="px-5 py-2.5 rounded-xl bg-rose-600/85 hover:bg-rose-600 text-white text-xs font-bold transition-colors">Reject</button>
+                        </div>
+                    </div>
+
+                    <!-- Grid Layout -->
+                    <div class="grid grid-cols-12 gap-6">
+                        <!-- Left Column: Details & Material -->
+                        <div class="col-span-12 lg:col-span-8 space-y-6">
+                            <div class="p-6 rounded-2xl bg-surface-1/50 border border-surface-3/10 shadow-sm">
+                                <div class="flex items-center justify-between mb-6">
+                                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Case Documents</h3>
+                                    <button onclick="document.getElementById('file-input').click()" class="px-3 py-1.5 rounded-lg bg-surface-2 hover:bg-surface-3 text-[10px] font-bold text-brand-400 transition-all">UPLOAD FILE</button>
+                                    <input id="file-input" type="file" multiple class="hidden" onchange="Actions.uploadFiles(event)">
+                                </div>
+                                <div id="document-list" 
+                                     ondragover="event.preventDefault(); this.classList.add('border-brand-500','bg-brand-500/10')"
+                                     ondragleave="event.preventDefault(); this.classList.remove('border-brand-500','bg-brand-500/10')"
+                                     ondrop="event.preventDefault(); this.classList.remove('border-brand-500','bg-brand-500/10'); Actions.uploadFiles({target: {files: event.dataTransfer.files}})"
+                                     class="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 rounded-xl border-2 border-dashed border-transparent transition-all min-h-[150px]"></div>
+                            </div>
+
+                            <div class="p-6 rounded-2xl bg-surface-1/50 border border-surface-3/10 shadow-sm">
+                                <div class="flex items-center justify-between mb-6">
+                                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">AI Summary</h3>
+                                    <button onclick="Actions.generateSummary()" class="text-[10px] font-bold text-brand-400 hover:text-brand-300">REFRESH</button>
+                                </div>
+                                <div id="case-summary" class="text-sm text-slate-300 leading-relaxed bg-surface-2/30 rounded-xl p-4 min-h-[100px] whitespace-pre-wrap">No summary available.</div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column: Activity & Metadata -->
+                        <div class="col-span-12 lg:col-span-4 space-y-6">
+                            <div class="p-6 rounded-2xl bg-surface-1/50 border border-surface-3/10 shadow-sm">
+                                <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Details</h3>
+                                <div class="space-y-5">
+                                    <div><label class="text-[9px] text-slate-500 font-bold block mb-1 uppercase tracking-wider">Case ID</label><p id="case-id-display" class="text-xs text-white font-mono bg-surface-2/50 px-2 py-1 rounded inline-block">--</p></div>
+                                    <div><label class="text-[9px] text-slate-500 font-bold block mb-1 uppercase tracking-wider">Date Created</label><p id="case-created-display" class="text-xs text-white">--</p></div>
+                                    <div><label class="text-[9px] text-slate-500 font-bold block mb-1 uppercase tracking-wider">Channel</label><p id="case-channel-display" class="text-xs text-white">--</p></div>
+                                </div>
+                            </div>
+
+                            <div class="p-6 rounded-2xl bg-surface-1/50 border border-surface-3/10 shadow-sm">
+                                <div class="flex items-center justify-between mb-6">
+                                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Activity</h3>
+                                    <button onclick="UI.openAddNoteModal()" class="h-6 w-6 rounded-lg bg-surface-2 flex items-center justify-center text-slate-400 hover:text-white transition-colors">+</button>
+                                </div>
+                                <div id="activity-log" class="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="new-case-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
+        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200">
+            <h2 class="text-xl font-bold text-white">New Legal Case</h2>
+            <div class="space-y-4">
+                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Client Name</label><input id="nc-name" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all"></div>
+                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Matter Type</label>
+                    <select id="nc-matter" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all">
+                        <option>Commercial Lease Dispute</option>
+                        <option>Civil Litigation</option>
+                        <option>Contract Dispute</option>
+                    </select>
+                </div>
+                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Initial Summary</label><textarea id="nc-msg" rows="3" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all resize-none"></textarea></div>
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button onclick="Actions.createCase()" class="flex-1 py-3 rounded-xl bg-brand-600 text-white text-sm font-bold shadow-lg shadow-brand-600/20">Create Case</button>
+                <button onclick="Actions.toggleModal('new-case-modal', false)" class="px-6 py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF Viewer Modal -->
+    <div id="pdf-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/90 backdrop-blur-md p-4 lg:p-12">
+        <div class="glass w-full h-full rounded-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div class="h-14 border-b border-surface-3/20 flex items-center justify-between px-6 shrink-0 bg-surface-1/50 gap-3">
+                <h3 id="pdf-title" class="text-sm font-bold text-white truncate flex-1 min-w-0">Document Preview</h3>
+                <button type="button" onclick="Actions.openDocInNewTab()" id="pdf-open-tab" class="px-3 py-1.5 rounded-lg bg-surface-3/60 text-[11px] font-bold text-slate-200 hover:text-white hover:bg-surface-3 shrink-0">Open in tab</button>
+                <button onclick="Actions.toggleModal('pdf-modal', false)" class="p-2 text-slate-400 hover:text-white transition-colors shrink-0">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="doc-preview-wrap" class="flex-1 bg-white/5 relative flex items-center justify-center overflow-auto min-h-[50vh] p-4">
+                <iframe id="pdf-frame" class="w-full h-full min-h-[50vh] border-0" src=""></iframe>
+                <img id="doc-preview-img" class="hidden max-w-full max-h-[85vh] object-contain select-none" alt="Preview" />
+                <pre id="doc-preview-text" class="hidden w-full h-full text-slate-300 whitespace-pre-wrap font-sans text-sm leading-relaxed overflow-auto custom-scrollbar p-6 bg-surface-1/50 rounded-xl border border-surface-3/30"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- RAG Search Modal -->
+    <div id="rag-search-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
+        <div class="glass w-full max-w-2xl rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+            <h2 class="text-xl font-bold text-white">Global Knowledge Search</h2>
+            <div class="flex gap-2">
+                <input id="rag-query" class="flex-1 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50" placeholder="Ask anything about the documents...">
+                <button onclick="Actions.searchRAG()" class="px-6 rounded-xl bg-brand-600 text-white text-sm font-bold">Search</button>
+            </div>
+            <div id="rag-results" class="flex-1 overflow-y-auto space-y-4 custom-scrollbar pr-2">
+                <p class="text-center py-8 text-slate-500 text-sm italic">Enter a query to search across all case files.</p>
+            </div>
+            <button onclick="Actions.toggleModal('rag-search-modal', false)" class="w-full py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Close</button>
+        </div>
+    </div>
+
+    <!-- System Modal -->
+    <div id="system-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
+        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200">
+            <h2 class="text-xl font-bold text-white">System Status</h2>
+            <div id="system-info" class="space-y-4">
+                <div class="p-4 rounded-xl bg-surface-2/50 space-y-2">
+                    <div class="flex justify-between"><span class="text-[10px] font-bold text-slate-500 uppercase">Platform</span><span id="sys-platform" class="text-xs text-white">--</span></div>
+                    <div class="flex justify-between"><span class="text-[10px] font-bold text-slate-500 uppercase">Memory</span><span id="sys-memory" class="text-xs text-white">--</span></div>
+                    <div class="flex justify-between"><span class="text-[10px] font-bold text-slate-500 uppercase">M-Series</span><span id="sys-apple" class="text-xs text-white">--</span></div>
+                </div>
+            </div>
+            <button onclick="Actions.toggleModal('system-modal', false)" class="w-full py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Close</button>
+        </div>
+    </div>
+
+    <!-- Add Note Modal -->
+    <div id="note-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
+        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200">
+            <h2 class="text-xl font-bold text-white">Add Case Note</h2>
+            <textarea id="note-text" rows="4" class="w-full rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 resize-none"></textarea>
+            <div class="flex gap-3">
+                <button onclick="Actions.addNote()" class="flex-1 py-3 rounded-xl bg-brand-600 text-white text-sm font-bold">Add Note</button>
+                <button onclick="Actions.toggleModal('note-modal', false)" class="px-6 py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Case Modal -->
+    <div id="edit-case-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
+        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200">
+            <h2 class="text-xl font-bold text-white">Edit Case Info</h2>
+            <div class="space-y-4">
+                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Client Name</label><input id="ec-name" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all"></div>
+                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Matter Type</label>
+                    <select id="ec-matter" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all">
+                        <option>Commercial Lease Dispute</option>
+                        <option>Civil Litigation</option>
+                        <option>Contract Dispute</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button onclick="Actions.updateCase()" class="flex-1 py-3 rounded-xl bg-brand-600 text-white text-sm font-bold shadow-lg shadow-brand-600/20">Save Changes</button>
+                <button onclick="Actions.toggleModal('edit-case-modal', false)" class="px-6 py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = window.location.origin + "/v1";
+
+        function escapeHtmlAttr(s) {
+            return String(s)
+                .replace(/&/g, "&amp;")
+                .replace(/"/g, "&quot;")
+                .replace(/</g, "&lt;");
+        }
+
+        function escapeHtml(s) {
+            return String(s)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+        }
+        
+        const State = {
+            cases: [],
+            selectedCase: null,
+            jobs: {},
+            caseFilter: "",
+            workflow: [
+                { key: "CLIENT_CAPTURE", label: "Intake" },
+                { key: "INITIAL_CONTACT", label: "Contact" },
+                { key: "CASE_EVALUATION", label: "Evaluation" },
+                { key: "FEE_COLLECTION", label: "Fees" },
+                { key: "GROUP_CREATION", label: "Setup" },
+                { key: "MATERIAL_INGESTION", label: "Materials" },
+                { key: "DOCUMENT_GENERATION", label: "Drafting" },
+                { key: "CLIENT_APPROVAL", label: "Approval" },
+                { key: "FINAL_PDF_SEND", label: "Delivery" },
+                { key: "ARCHIVE_CLOSE", label: "Closed" }
+            ],
+
+            hitlGateLabels: {
+                CASE_EVALUATION: "Case evaluation (risk and merits review)",
+                DOCUMENT_GENERATION: "Document drafting (templates and pleadings)",
+                FINAL_PDF_SEND: "Final PDF delivery to client"
+            },
+
+            pendingHITLGate(c) {
+                if (!c || !c.state) return null;
+                const order = this.workflow.map(w => w.key);
+                const i = order.indexOf(c.state);
+                if (i < 0 || i >= order.length - 1) return null;
+                const gate = order[i + 1];
+                if (!this.hitlGateLabels[gate]) return null;
+                const approvals = c.hitl_approvals || {};
+                if (approvals[gate] === true) return null;
+                const status = approvals[gate] === false ? "rejected" : "pending";
+                return { gate, label: this.hitlGateLabels[gate], status };
+            },
+
+            update(data) {
+                if (!data || typeof data !== "object") return;
+                if (data.cases) this.cases = data.cases;
+                if (data.jobs) {
+                    const newJobs = {};
+                    data.jobs.forEach(j => {
+                        newJobs[j.id] = j;
+                    });
+                    this.jobs = newJobs;
+                }
+                if (this.selectedCase) {
+                    const updated = this.cases.find(c => c.case_id === this.selectedCase.case_id);
+                    if (updated) this.selectedCase = updated;
+                }
+                UI.render();
+            },
+
+            async fetchFullCase(id) {
+                try {
+                    const r = await fetch(`${API}/cases/${id}`);
+                    this.selectedCase = await r.json();
+                    UI.render();
+                } catch (e) { UI.toast("Failed to fetch case", "error"); }
+            }
+        };
+
+        const UI = {
+            toast(msg, type = "info") {
+                const colors = { info: "bg-brand-600", success: "bg-emerald-600", error: "bg-rose-600" };
+                const el = document.createElement("div");
+                el.className = `p-4 rounded-xl ${colors[type]} text-white text-xs font-bold shadow-xl animate-in slide-in-from-right-4 duration-300`;
+                el.textContent = msg;
+                document.getElementById("toast-container").appendChild(el);
+                setTimeout(() => el.remove(), 4000);
+            },
+
+            render() {
+                this.renderCaseList();
+                this.renderCaseDetail();
+                this.renderJobs();
+            },
+
+            renderCaseList() {
+                const list = document.getElementById("case-list");
+                
+                const filtered = State.caseFilter 
+                    ? State.cases.filter(c => 
+                        c.client_name.toLowerCase().includes(State.caseFilter.toLowerCase()) || 
+                        c.case_id.toLowerCase().includes(State.caseFilter.toLowerCase()))
+                    : State.cases;
+
+                document.getElementById("case-count").textContent = filtered.length;
+                
+                // Use a document fragment for faster DOM insertion of large lists
+                const fragment = document.createDocumentFragment();
+                filtered.forEach(c => {
+                    const active = State.selectedCase?.case_id === c.case_id;
+                    const el = document.createElement("button");
+                    el.type = "button";
+                    el.dataset.caseId = c.case_id;
+                    el.className = `case-row-btn group w-full flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all text-left ${active ? 'bg-brand-500/10 border border-brand-500/30' : 'hover:bg-surface-2/50 border border-transparent'}`;
+                    el.innerHTML = `
+                        <div class="min-w-0 pointer-events-none">
+                            <h4 class="text-xs font-bold ${active ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'} truncate">${escapeHtml(c.client_name)}</h4>
+                            <p class="text-[9px] text-slate-500 font-medium truncate mt-0.5">${escapeHtml(c.matter_type)}</p>
+                        </div>
+                        <div class="h-1.5 w-1.5 rounded-full shrink-0 pointer-events-none ${active ? 'bg-brand-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]' : 'bg-surface-3'}"></div>
+                    `;
+                    fragment.appendChild(el);
+                });
+                
+                list.innerHTML = "";
+                list.appendChild(fragment);
+            },
+
+            renderCaseDetail() {
+                if (!State.selectedCase) {
+                    document.getElementById("empty-state").classList.remove("hidden");
+                    document.getElementById("case-content").classList.add("hidden");
+                    document.getElementById("header-case-id").textContent = "No Case Selected";
+                    return;
+                }
+
+                document.getElementById("empty-state").classList.add("hidden");
+                document.getElementById("case-content").classList.remove("hidden");
+
+                const c = State.selectedCase;
+                document.getElementById("header-case-id").textContent = c.case_id;
+                document.getElementById("case-client").textContent = c.client_name;
+                document.getElementById("case-matter").textContent = c.matter_type;
+                document.getElementById("case-id-display").textContent = c.case_id;
+                document.getElementById("case-channel-display").textContent = c.source_channel || "Direct";
+                document.getElementById("case-created-display").textContent = new Date(c.created_at).toLocaleDateString();
+                document.getElementById("case-status-badge").textContent = c.state.replace(/_/g, " ");
+
+                const sumEl = document.getElementById("case-summary");
+                if (sumEl) {
+                    sumEl.textContent = (c.ai_case_summary && String(c.ai_case_summary).trim())
+                        ? c.ai_case_summary
+                        : "No summary available. Click REFRESH to generate.";
+                }
+
+                const hitl = document.getElementById("hitl-panel");
+                const ph = State.pendingHITLGate(c);
+                if (hitl) {
+                    if (ph) {
+                        hitl.classList.remove("hidden");
+                        hitl.dataset.gateState = ph.gate;
+                        const cur = State.workflow.find(w => w.key === c.state);
+                        document.getElementById("hitl-panel-desc").textContent =
+                            `Current stage: ${cur ? cur.label : c.state}. To move into the next stage, a reviewer must sign off on: ${ph.label}.`;
+                        document.getElementById("hitl-panel-status").textContent =
+                            ph.status === "rejected"
+                                ? "Previous decision: rejected — approve below when ready to proceed, or reject again with a note."
+                                : "Awaiting reviewer approval.";
+                    } else {
+                        hitl.classList.add("hidden");
+                        delete hitl.dataset.gateState;
+                    }
+                }
+
+                this.renderWorkflow();
+                this.renderDocuments();
+                this.renderActivity();
+            },
+
+            renderWorkflow() {
+                const currentIdx = State.workflow.findIndex(w => w.key === State.selectedCase.state);
+                document.getElementById("workflow-steps").innerHTML = State.workflow.map((w, i) => {
+                    const completed = i < currentIdx;
+                    const active = i === currentIdx;
+                    return `
+                        <div class="flex flex-col items-center gap-2 relative z-10 group">
+                            <div class="h-3 w-3 rounded-full border-2 transition-all duration-700 ${completed ? 'bg-emerald-500 border-emerald-500' : active ? 'bg-brand-500 border-brand-500 scale-125 shadow-[0_0_12px_rgba(59,130,246,0.4)]' : 'bg-surface-1 border-surface-2'}"></div>
+                            <span class="text-[8px] font-bold uppercase tracking-widest ${active ? 'text-white' : 'text-slate-600'}">${w.label}</span>
+                        </div>
+                    `;
+                }).join("");
+            },
+
+            renderDocuments() {
+                const docs = State.selectedCase.uploaded_documents || [];
+                const sums = State.selectedCase.ai_file_summaries || [];
+                const byName = {};
+                for (const row of sums) {
+                    if (row && row.filename) byName[row.filename] = row;
+                }
+                document.getElementById("document-list").innerHTML = docs.length ? docs.map(d => {
+                    const row = byName[d];
+                    const cls = row && row.classification;
+                    const sub = (cls && (cls.display_name_zh || cls.document_type))
+                        ? String(cls.display_name_zh || cls.document_type)
+                        : "View";
+                        
+                    let summaryHtml = "";
+                    if (cls) {
+                        const summary = cls.summary_zh || "No summary available.";
+                        const entities = cls.entities || {};
+                        const plaintiffs = (entities.plaintiffs || []).join(", ") || "--";
+                        const defendants = (entities.defendants || []).join(", ") || "--";
+                        
+                        summaryHtml = `
+                            <div class="mt-3 pt-3 border-t border-surface-3/10 pointer-events-none">
+                                <p class="text-[9px] text-slate-400 mb-2 leading-relaxed" title="${escapeHtmlAttr(summary)}">${escapeHtml(summary)}</p>
+                                <div class="flex flex-col gap-1">
+                                    <div class="flex items-start gap-1"><span class="text-[8px] font-bold text-slate-500 uppercase shrink-0">原告/申请:</span> <span class="text-[9px] text-emerald-400 truncate font-semibold">${escapeHtml(plaintiffs)}</span></div>
+                                    <div class="flex items-start gap-1"><span class="text-[8px] font-bold text-slate-500 uppercase shrink-0">被告/被申:</span> <span class="text-[9px] text-rose-400 truncate font-semibold">${escapeHtml(defendants)}</span></div>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    return `
+                    <div class="doc-card p-4 rounded-xl bg-surface-2/40 border border-surface-3/10 hover:border-brand-500/30 transition-all group flex flex-col relative">
+                        <button type="button" onclick="Actions.deleteDocument('${escapeHtmlAttr(State.selectedCase.case_id)}', '${escapeHtmlAttr(d)}')" class="absolute top-2 right-2 p-1.5 rounded-md bg-surface-3/60 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 opacity-0 group-hover:opacity-100 transition-all z-10" title="Delete Document">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                        <div role="button" tabindex="0" onclick="Actions.viewDocument('${escapeHtmlAttr(d)}')" class="flex items-center gap-3 cursor-pointer">
+                            <div class="h-8 w-8 shrink-0 rounded-lg bg-surface-3 flex items-center justify-center text-slate-500 group-hover:text-brand-400">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <p class="text-[10px] font-bold text-slate-300 truncate" title="${escapeHtmlAttr(d)}">${escapeHtml(d)}</p>
+                                <p class="text-[8px] text-slate-500 font-bold uppercase tracking-tight truncate">${escapeHtml(sub)}</p>
+                            </div>
+                        </div>
+                        ${summaryHtml}
+                    </div>
+                `;
+                }).join("") : '<div class="col-span-full py-8 text-center text-[9px] text-slate-600 font-bold border-2 border-dashed border-surface-2 rounded-2xl">NO FILES</div>';
+            },
+
+            renderActivity() {
+                const notes = State.selectedCase.notes || [];
+                document.getElementById("activity-log").innerHTML = notes.length ? notes.slice().reverse().map(n => `
+                    <div class="p-3 rounded-xl bg-surface-2/20 border border-surface-3/5 text-[10px] leading-relaxed">
+                        <p class="text-slate-400">${n.text}</p>
+                        <div class="mt-2 text-[8px] text-slate-600 font-bold uppercase tracking-tighter">${new Date(n.timestamp).toLocaleString()}</div>
+                    </div>
+                `).join("") : '<p class="text-center py-4 text-[9px] text-slate-700 font-bold uppercase">Empty</p>';
+            },
+
+            renderJobs() {
+                const jobs = Object.values(State.jobs);
+                document.getElementById("job-list").innerHTML = jobs.length ? jobs.map(j => `
+                    <div class="p-3 rounded-xl bg-surface-2/40 border border-surface-3/20">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-[9px] font-bold text-slate-400 uppercase">${j.type}</span>
+                            <span class="text-[8px] font-bold ${j.status === 'completed' ? 'text-emerald-500' : 'text-brand-400 animate-pulse'} uppercase">${j.status}</span>
+                        </div>
+                        <div class="h-1 w-full bg-surface-3 rounded-full overflow-hidden">
+                            <div class="h-full bg-brand-500 transition-all duration-500" style="width: ${j.progress}%"></div>
+                        </div>
+                    </div>
+                `).join("") : '<p class="text-[9px] text-slate-700 text-center py-2 italic font-medium">System Idle</p>';
+            },
+
+            openNewCaseModal() { Actions.toggleModal('new-case-modal', true); },
+            openRAGSearch() { Actions.toggleModal('rag-search-modal', true); },
+            openSystemModal() { Actions.fetchSystemStatus(); Actions.toggleModal('system-modal', true); },
+            openAddNoteModal() { Actions.toggleModal('note-modal', true); },
+            openEditCaseModal() {
+                if (!State.selectedCase) return;
+                document.getElementById("ec-name").value = State.selectedCase.client_name;
+                document.getElementById("ec-matter").value = State.selectedCase.matter_type;
+                Actions.toggleModal('edit-case-modal', true);
+            }
+        };
+
+        const Actions = {
+            filterCases(query) {
+                State.caseFilter = query;
+                UI.renderCaseList();
+            },
+
+            async refreshAll() {
+                try {
+                    const r = await fetch(`${API}/status`);
+                    State.update(await r.json());
+                } catch (e) {}
+            },
+
+            async selectCase(id) { await State.fetchFullCase(id); },
+
+            async updateCase() {
+                if (!State.selectedCase) return;
+                const name = document.getElementById("ec-name").value.trim();
+                const matter = document.getElementById("ec-matter").value;
+                if (!name) return;
+                try {
+                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ client_name: name, matter_type: matter })
+                    });
+                    if (r.ok) {
+                        UI.toast("Case updated", "success");
+                        Actions.toggleModal('edit-case-modal', false);
+                        State.fetchFullCase(State.selectedCase.case_id);
+                        Actions.refreshAll();
+                    }
+                } catch (e) { UI.toast("Update failed", "error"); }
+            },
+
+            _lastDocViewUrl: "",
+
+            openDocInNewTab() {
+                const u = this._lastDocViewUrl;
+                if (u) window.open(u, "_blank", "noopener,noreferrer");
+            },
+
+            async viewDocument(filename) {
+                document.getElementById("pdf-title").textContent = filename;
+                const url = `${API}/documents/${encodeURIComponent(filename)}/view`;
+                this._lastDocViewUrl = url;
+                try {
+                    const head = await fetch(url, { method: "HEAD" });
+                    if (!head.ok) {
+                        UI.toast(head.status === 404 ? "File not found or not indexed" : "Could not open document", "error");
+                        return;
+                    }
+                } catch (e) {
+                    UI.toast("Could not reach server for this file", "error");
+                    return;
+                }
+                const frame = document.getElementById("pdf-frame");
+                const img = document.getElementById("doc-preview-img");
+                const textPreview = document.getElementById("doc-preview-text");
+
+                const lower = filename.toLowerCase();
+                const isImage = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(lower);
+                const isText = /\.(docx|txt|md|csv)$/i.test(lower);
+
+                if (isImage) {
+                    frame.classList.add("hidden");
+                    textPreview.classList.add("hidden");
+                    img.classList.remove("hidden");
+                    img.onerror = () => UI.toast("Image preview failed — try Open in tab", "error");
+                    img.src = url;
+                } else if (isText) {
+                    frame.classList.add("hidden");
+                    img.classList.add("hidden");
+                    img.removeAttribute("src");
+                    textPreview.classList.remove("hidden");
+                    textPreview.textContent = "Loading text content...";
+                    try {
+                        const r = await fetch(`${API}/documents/${encodeURIComponent(filename)}/content`);
+                        const d = await r.json();
+                        textPreview.textContent = d.content || "No text content available.";
+                    } catch(e) {
+                        textPreview.textContent = "Failed to load content.";
+                    }
+                } else {
+                    img.classList.add("hidden");
+                    textPreview.classList.add("hidden");
+                    img.removeAttribute("src");
+                    img.onerror = null;
+                    frame.classList.remove("hidden");
+                    frame.src = url;
+                }
+                this.toggleModal('pdf-modal', true);
+            },
+
+            async deleteCase() {
+                if (!State.selectedCase) return;
+                if (!confirm(`Delete case for ${State.selectedCase.client_name}?`)) return;
+                try {
+                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/delete`, { method: "POST" });
+                    if (r.ok) {
+                        UI.toast("Case deleted", "success");
+                        State.selectedCase = null;
+                        this.refreshAll();
+                    }
+                } catch (e) { UI.toast("Delete failed", "error"); }
+            },
+
+            async deleteDocument(caseId, filename) {
+                if (!confirm(`Delete document ${filename}?`)) return;
+                try {
+                    const r = await fetch(`${API}/cases/${caseId}/documents/${encodeURIComponent(filename)}`, { method: "DELETE" });
+                    if (r.ok) {
+                        UI.toast("Document deleted", "success");
+                        State.fetchFullCase(caseId);
+                    } else {
+                        UI.toast("Failed to delete document", "error");
+                    }
+                } catch (e) { UI.toast("Delete failed", "error"); }
+            },
+
+            async createCase() {
+                const name = document.getElementById("nc-name").value.trim();
+                if (!name) return UI.toast("Name required", "error");
+                try {
+                    const r = await fetch(`${API}/cases/create`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ client_name: name, matter_type: document.getElementById("nc-matter").value, initial_msg: document.getElementById("nc-msg").value })
+                    });
+                    const d = await r.json();
+                    UI.toast("Case Created", "success");
+                    this.toggleModal('new-case-modal', false);
+                    this.selectCase(d.case_id);
+                } catch (e) { UI.toast("Creation failed", "error"); }
+            },
+
+            async uploadFiles(e) {
+                const input = e.target;
+                const files = input.files;
+                if (!files || files.length === 0) return;
+                
+                const fd = new FormData();
+                for (let i = 0; i < files.length; i++) {
+                    fd.append("files", files[i]);
+                }
+                if (State.selectedCase) {
+                    fd.append("case_id", State.selectedCase.case_id);
+                }
+                
+                try {
+                    const r = await fetch(`${API}/upload/batch`, { method: "POST", body: fd });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) {
+                        UI.toast(d.error || `Batch upload failed`, "error");
+                        return;
+                    }
+                    if (d.job_id) {
+                        State.addJob(d.job_id);
+                        UI.toast(`Processing batch of ${files.length} files…`, "info");
+                    } else UI.toast(`Upload accepted but no job_id`, "error");
+                } catch (e) { 
+                    UI.toast(`Upload failed`, "error"); 
+                }
+                input.value = "";
+            },
+
+            async searchRAG() {
+                const q = document.getElementById("rag-query").value.trim();
+                if (!q) return;
+                const resEl = document.getElementById("rag-results");
+                resEl.innerHTML = '<div class="flex justify-center py-8"><div class="animate-spin h-6 w-6 border-2 border-brand-500 border-t-transparent rounded-full"></div></div>';
+                try {
+                    const r = await fetch(`${API}/rag/search`, {
+                        method: "POST",
+                        body: JSON.stringify({ query: q, k: 5 })
+                    });
+                    const d = await r.json();
+                    if (!d.results?.length) {
+                        resEl.innerHTML = '<p class="text-center py-8 text-slate-500 text-sm">No matches found.</p>';
+                        return;
+                    }
+                    resEl.innerHTML = d.results.map(res => `
+                        <div class="p-4 rounded-xl bg-surface-2/50 border border-surface-3/30 space-y-2">
+                            <div class="flex justify-between items-center"><span class="text-[10px] font-bold text-brand-400 uppercase">${res.filename}</span><span class="text-[9px] text-slate-500">${res.score}</span></div>
+                            <p class="text-xs text-slate-300 leading-relaxed">${res.chunk}</p>
+                        </div>
+                    `).join("");
+                } catch (e) { resEl.innerHTML = '<p class="text-rose-500 text-center py-8 text-xs">Search failed.</p>'; }
+            },
+
+            async addNote() {
+                if (!State.selectedCase) return;
+                const text = document.getElementById("note-text").value.trim();
+                if (!text) return;
+                try {
+                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/notes`, {
+                        method: "POST",
+                        body: JSON.stringify({ text })
+                    });
+                    if (r.ok) {
+                        UI.toast("Note added", "success");
+                        document.getElementById("note-text").value = "";
+                        this.toggleModal('note-modal', false);
+                        State.fetchFullCase(State.selectedCase.case_id);
+                    }
+                } catch (e) { UI.toast("Failed to add note", "error"); }
+            },
+
+            async fetchSystemStatus() {
+                try {
+                    const r = await fetch(`${API}/device`);
+                    const d = await r.json();
+                    document.getElementById("sys-platform").textContent = d.platform_id;
+                    document.getElementById("sys-memory").textContent = d.memory_mb + " MB";
+                    document.getElementById("sys-apple").textContent = d.is_apple_silicon ? "Yes" : "No";
+                } catch (e) {}
+            },
+
+            async advanceState() {
+                if (!State.selectedCase) return;
+                try {
+                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/advance`, { method: "POST" });
+                    if (!r.ok) {
+                        let msg = "Could not advance";
+                        try {
+                            const d = await r.json();
+                            if (d.error) msg = d.error;
+                        } catch (_) {}
+                        UI.toast(msg, "error");
+                        if (msg.includes("HITL") || msg.includes("approval")) {
+                            UI.toast("Use the Human review panel below to approve or reject.", "info");
+                        }
+                        return;
+                    }
+                    this.refreshAll();
+                } catch (e) { UI.toast("Could not advance", "error"); }
+            },
+
+            async submitHITL(approved) {
+                if (!State.selectedCase) return;
+                const hitl = document.getElementById("hitl-panel");
+                const gate = hitl && hitl.dataset.gateState;
+                if (!gate) {
+                    UI.toast("No review gate active.", "error");
+                    return;
+                }
+                const note = document.getElementById("hitl-reason").value.trim();
+                const reason = note || (approved ? "Approved" : "Rejected");
+                try {
+                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/approve`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ state: gate, approved, reason })
+                    });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) {
+                        UI.toast(d.error || "Review submission failed", "error");
+                        return;
+                    }
+                    UI.toast(approved ? "Review approved" : "Review rejected", approved ? "success" : "info");
+                    document.getElementById("hitl-reason").value = "";
+                    await State.fetchFullCase(State.selectedCase.case_id);
+                    await this.refreshAll();
+                } catch (e) { UI.toast("Review submission failed", "error"); }
+            },
+
+            async generateSummary() {
+                if (!State.selectedCase) return;
+                const el = document.getElementById("case-summary");
+                el.textContent = "AI is analyzing documents...";
+                try {
+                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/summarize`, { method: "POST" });
+                    const d = await r.json();
+                    if (!r.ok) {
+                        el.textContent = d.error || "Summary failed.";
+                        return;
+                    }
+                    el.textContent = d.summary != null ? d.summary : "No summary returned.";
+                } catch (e) { el.textContent = "Summary failed."; }
+            },
+
+            toggleModal(id, show) {
+                const el = document.getElementById(id);
+                if (id === "pdf-modal" && !show) {
+                    const frame = document.getElementById("pdf-frame");
+                    const img = document.getElementById("doc-preview-img");
+                    frame.src = "";
+                    img.removeAttribute("src");
+                    frame.classList.remove("hidden");
+                    img.classList.add("hidden");
+                    document.getElementById("pdf-title").textContent = "Document Preview";
+                }
+                if (id === "rag-search-modal" && !show) {
+                    document.getElementById("rag-query").value = "";
+                    document.getElementById("rag-results").innerHTML = '<p class="text-center py-8 text-slate-500 text-sm italic">Enter a query to search across all case files.</p>';
+                }
+                el.classList.toggle('hidden', !show);
+                el.classList.toggle('flex', show);
+            }
+        };
+
+        let _wsBackoffMs = 1000;
+        const _wsBackoffMax = 30000;
+        let _wsConnected = false;
+
+        async function pollStatusIfWSDead() {
+            if (_wsConnected) return;
+            try {
+                const r = await fetch(`${API}/status`);
+                if (!r.ok) return;
+                const d = await r.json();
+                State.update(d);
+                document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-amber-500";
+                document.getElementById("conn-text").textContent = "Live (HTTP)";
+            } catch (e) {}
+        }
+
+        setInterval(pollStatusIfWSDead, 4000);
+        pollStatusIfWSDead();
+
+        document.getElementById("case-list").addEventListener("click", (e) => {
+            const btn = e.target.closest(".case-row-btn[data-case-id]");
+            if (!btn) return;
+            e.preventDefault();
+            const id = btn.getAttribute("data-case-id");
+            if (id) Actions.selectCase(id);
+        });
+
+        document.getElementById("document-list").addEventListener("click", (e) => {
+            const card = e.target.closest(".doc-card[data-doc-name]");
+            if (!card) return;
+            e.preventDefault();
+            const name = card.getAttribute("data-doc-name");
+            if (name) Actions.viewDocument(name);
+        });
+
+        document.getElementById("document-list").addEventListener("keydown", (e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            const card = e.target.closest(".doc-card[data-doc-name]");
+            if (!card) return;
+            e.preventDefault();
+            const name = card.getAttribute("data-doc-name");
+            if (name) Actions.viewDocument(name);
+        });
+
+        function connectWS() {
+            const ws = new WebSocket((location.protocol === "https:" ? "wss:" : "ws:") + "//" + location.host + "/ws");
+            ws.onopen = () => {
+                _wsConnected = true;
+                _wsBackoffMs = 1000;
+                document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-emerald-500 pulse-dot";
+                document.getElementById("conn-text").textContent = "Connected";
+                Actions.refreshAll();
+            };
+            ws.onmessage = (e) => {
+                try {
+                    const payload = JSON.parse(e.data);
+                    State.update(payload);
+                } catch (err) {
+                    console.warn("WebSocket message parse error", err);
+                }
+            };
+            ws.onerror = () => {
+                document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-yellow-500";
+                document.getElementById("conn-text").textContent = "Error";
+            };
+            ws.onclose = () => {
+                _wsConnected = false;
+                document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-rose-500";
+                document.getElementById("conn-text").textContent = "Reconnecting…";
+                pollStatusIfWSDead();
+                setTimeout(connectWS, _wsBackoffMs);
+                _wsBackoffMs = Math.min(_wsBackoffMax, Math.floor(_wsBackoffMs * 1.5));
+            };
+        }
+
+        connectWS();
+    </script>
+</body>
+</html>
