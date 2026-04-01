@@ -92,7 +92,7 @@ func (m *Manager) saveStore() {
 		BM25AvgDocLen: m.bm25AvgDocLen,
 	}
 	
-	data, err := json.MarshalIndent(ps, "", "  ")
+	data, err := json.Marshal(ps)
 	if err != nil {
 		return
 	}
