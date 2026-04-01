@@ -234,8 +234,42 @@ func (p *BatchProcessor) ProcessBatch(ctx context.Context, jobID string, filePat
 	var uploaded []string
 	var failed []string
 
+	// V2.1: Evidence Aggregation
+	type evidenceGroup struct {
+		docType string
+		files   []*fileState
+	}
+	groups := make(map[string]*evidenceGroup)
+
+	for _, s := range states {
+		if s.ocrErr != nil || s.classification == nil {
+			continue
+		}
+		dt, _ := s.classification["document_type"].(string)
+		if dt == "wechat_chat_screenshot" || dt == "resident_id_card" {
+			if _, exists := groups[dt]; !exists {
+				groups[dt] = &evidenceGroup{docType: dt}
+			}
+			groups[dt].files = append(groups[dt].files, s)
+		}
+	}
+
 	targetCaseID := opts.CaseID
-	// In V2, if CaseID is empty, we could use batchMeta.ClientName to resolve it.
+	
+	// Create "Red Flags" if necessary
+	if batchMeta.MatterType == "Loan Dispute" || batchMeta.MatterType == "Debt Dispute" {
+		hasDebtNote := false
+		for _, s := range states {
+			dt, _ := s.classification["document_type"].(string)
+			if dt == "iou_debt_note" {
+				hasDebtNote = true
+				break
+			}
+		}
+		if !hasDebtNote {
+			log.Printf("[Processor] WARNING: Loan Dispute detected but no Debt Note (IOU) found in batch!")
+		}
+	}
 
 	for i, s := range states {
 		if s.ocrErr != nil {

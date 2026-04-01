@@ -63,10 +63,10 @@ func buildClassificationPrompt(logicalName string) string {
 - display_name_zh: 简短中文类型名（4–12 字）
 - confidence: 仅允许 "high" 或 "low"
 - summary_zh: 一句中文概括材料要点（当事人、案由、金额、法院等，无则写「材料信息不足」），不超过 80 字
-- entities: 对象，尽量抽取；无法抽取则省略键或给空数组。可用键示例：
-  plaintiffs (string[] - 原告/上诉人/申请人等), defendants (string[] - 被告/被上诉人/被申请人等), 
-  amounts_cny (string[]), dates (string[]), id_numbers (string[]),
-  phones (string[]), courts (string[]), app_or_platform (string)
+- entities: 对象，尽量抽取。
+  对于 resident_id_card: 必须提取 name (姓名), id_number (18位号码), address (住址)。
+  对于 wechat_chat_screenshot: 必须提取 participants (聊天人), total_amount (涉及总金额), keywords (关键词如"还钱","借给我")。
+  通用键示例：plaintiffs, defendants, amounts_cny, dates, id_numbers, phones, courts.
 
 材料来源标签（不得单独作为分类依据）：` + logicalName
 }

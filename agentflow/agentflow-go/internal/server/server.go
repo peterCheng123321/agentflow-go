@@ -101,6 +101,11 @@ func (s *Server) Router() http.Handler {
 	})
 }
 
+func (s *Server) BatchProcessor() *processor.BatchProcessor { return s.processor }
+func (s *Server) Workflow() *workflow.Engine           { return s.workflow }
+func (s *Server) OCR() *ocr.Engine                     { return s.ocr }
+func (s *Server) RAG() *rag.Manager                     { return s.rag }
+
 func (s *Server) Shutdown() {
 	s.llm.Unload()
 	s.ocr.Unload()

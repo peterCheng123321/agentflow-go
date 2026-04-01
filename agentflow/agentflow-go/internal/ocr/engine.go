@@ -282,12 +282,20 @@ func (e *Engine) scanWithModel(filePath string) (string, error) {
 }
 
 func (e *Engine) doOCR(data []byte, filename string) (string, error) {
-	// Use Ollama's vision API
+	// Use Ollama's vision API or DashScope
 	encoded := base64.StdEncoding.EncodeToString(data)
+	
+	prompt := "OCR: Extract all text from this document accurately."
+	lower := strings.ToLower(filename)
+	if strings.Contains(lower, "id_card") || strings.Contains(lower, "身份证") {
+		prompt = "OCR: This is an ID Card. Extract Name, ID Number, Address, and Date of Birth. Format clearly."
+	} else if strings.Contains(lower, "screenshot") || strings.Contains(lower, "微信") || strings.Contains(lower, "chat") {
+		prompt = "OCR: This is a Chat Screenshot. Extract the chat participants, timestamps, and the content of messages. Pay special attention to any mentions of money, dates, or agreements."
+	}
 	
 	payload := map[string]interface{}{
 		"model":  e.modelID,
-		"prompt": "OCR: Extract all text from this document accurately.",
+		"prompt": prompt,
 		"stream": false,
 		"images": []string{encoded},
 	}
