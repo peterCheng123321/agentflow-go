@@ -178,7 +178,7 @@ func (p *BatchProcessor) ProcessBatch(ctx context.Context, jobID string, filePat
 	p.jobUpdater.UpdateJob(jobID, func(j *model.Job) { j.Progress = 45 })
 
 	selectedDocs := make(map[string]string)
-	// Rank and select top 12 for batch analysis
+	// Rank and select top 12 for batch analysis. Keys must be unique (use file path, not display name).
 	sortedStates := make([]*fileState, len(states))
 	copy(sortedStates, states)
 	sort.Slice(sortedStates, func(i, j int) bool { return sortedStates[i].score > sortedStates[j].score })
@@ -189,16 +189,18 @@ func (p *BatchProcessor) ProcessBatch(ctx context.Context, jobID string, filePat
 	}
 	for i := 0; i < limit; i++ {
 		if sortedStates[i].ocrErr == nil {
-			selectedDocs[sortedStates[i].displayFilename] = sortedStates[i].ocrText
+			selectedDocs[sortedStates[i].filePath] = sortedStates[i].ocrText
 		}
 	}
 
 	var batchMeta BatchMeta
+	var batchAnalysisErr string
 	if len(selectedDocs) > 0 {
 		var bErr error
 		batchMeta, bErr = p.batchAnalyzer.AnalyzeBatch(ctx, selectedDocs)
 		if bErr != nil {
 			log.Printf("[Processor] Batch analysis failed: %v", bErr)
+			batchAnalysisErr = bErr.Error()
 		}
 	}
 	p.jobUpdater.UpdateJob(jobID, func(j *model.Job) { j.Progress = 55 })
@@ -225,7 +227,15 @@ func (p *BatchProcessor) ProcessBatch(ctx context.Context, jobID string, filePat
 			return nil
 		})
 	}
-	_ = g.Wait() // Classification failures are tolerated per file
+	_ = g.Wait() // per-file classify errors are recorded on fileState
+	for _, s := range states {
+		if s.ocrErr != nil {
+			continue
+		}
+		if s.classifyErr != nil {
+			log.Printf("[Processor] Classification failed for %s: %v", s.displayFilename, s.classifyErr)
+		}
+	}
 
 	p.jobUpdater.UpdateJob(jobID, func(j *model.Job) { j.Progress = 75 })
 
@@ -235,36 +245,37 @@ func (p *BatchProcessor) ProcessBatch(ctx context.Context, jobID string, filePat
 	var failed []string
 
 	targetCaseID := opts.CaseID
-	// In V2, if CaseID is empty, we could use batchMeta.ClientName to resolve it.
 
 	for i, s := range states {
 		if s.ocrErr != nil {
 			failed = append(failed, s.displayFilename)
-			continue
-		}
-
-		meta := map[string]interface{}{
-			"filename": s.displayFilename,
-		}
-		if s.classification != nil {
-			meta["classification"] = s.classification
-		}
-
-		if err := p.rag.IngestFile(s.filePath, s.ocrText, meta); err != nil {
-			log.Printf("[Processor] RAG ingest failed for %s: %v", s.displayFilename, err)
-			s.ingestErr = err
-			failed = append(failed, s.displayFilename)
 		} else {
-			uploaded = append(uploaded, s.displayFilename)
-			
-			// Attach to workflow
-			if targetCaseID != "" {
-				if s.classification != nil {
-					p.workflow.AttachDocument(targetCaseID, s.displayFilename, map[string]interface{}{
-						"classification": s.classification,
-					})
-				} else {
-					p.workflow.AttachDocument(targetCaseID, s.displayFilename)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+
+			meta := map[string]interface{}{
+				"filename": s.displayFilename,
+			}
+			if s.classification != nil {
+				meta["classification"] = s.classification
+			}
+
+			if err := p.rag.IngestFile(s.filePath, s.ocrText, meta); err != nil {
+				log.Printf("[Processor] RAG ingest failed for %s: %v", s.displayFilename, err)
+				s.ingestErr = err
+				failed = append(failed, s.displayFilename)
+			} else {
+				uploaded = append(uploaded, s.displayFilename)
+
+				if targetCaseID != "" {
+					if s.classification != nil {
+						p.workflow.AttachDocument(targetCaseID, s.displayFilename, map[string]interface{}{
+							"classification": s.classification,
+						})
+					} else {
+						p.workflow.AttachDocument(targetCaseID, s.displayFilename)
+					}
 				}
 			}
 		}
@@ -274,12 +285,16 @@ func (p *BatchProcessor) ProcessBatch(ctx context.Context, jobID string, filePat
 		})
 	}
 
-	return map[string]interface{}{
+	out := map[string]interface{}{
 		"uploaded":    uploaded,
 		"failed":      failed,
 		"count":       len(uploaded),
 		"case_id":     targetCaseID,
 		"client_name": batchMeta.ClientName,
 		"matter_type": batchMeta.MatterType,
-	}, nil
+	}
+	if batchAnalysisErr != "" {
+		out["batch_analysis_error"] = batchAnalysisErr
+	}
+	return out, nil
 }
