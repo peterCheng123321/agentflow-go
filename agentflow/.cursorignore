@@ -1,0 +1,15 @@
+# Keep Cursor index + search fast: skip deps and caches (was scanning 10k+ venv files).
+
+.venv/
+.venv-*/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+frontend/node_modules/
+frontend/dist/
+frontend/.next/

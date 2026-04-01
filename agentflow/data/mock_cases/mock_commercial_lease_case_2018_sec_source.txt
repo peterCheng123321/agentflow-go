@@ -1,0 +1,36 @@
+Mock commercial lease dispute case for workflow testing
+
+Source basis:
+- Public SEC lease exhibit: OFFICE LEASE AGREEMENT between THOR KIRBY 3 GROUP, LLC and PROS, INC.
+- Source URL used for research: https://www.sec.gov/Archives/edgar/data/1392972/000139297218000136/ex101officeleaseagreement.htm
+- This file is a simplified test case summary, not a verbatim copy of the source agreement.
+
+Test case summary:
+
+Landlord:
+THOR KIRBY 3 GROUP, LLC
+
+Tenant:
+PROS, INC.
+
+Property:
+Office space in The Kirby Collection, 3200 Kirby Drive, Houston, Texas 77098
+
+Lease background:
+- Effective date: November 30, 2018
+- The lease covers multiple floors and partial floors in the office building
+- The tenant is allowed to use the premises for general office use
+- The lease contains sections about rent, services, landlord work, repairs, default remedies, assignment, and notices
+
+Mock dispute facts for system testing:
+- The tenant says part of the landlord's work was not substantially complete when possession was delivered
+- The tenant says building services were unreliable for several weeks after move-in
+- The tenant asks for rent reduction or temporary rent abatement
+- The landlord argues the agreement limits rent abatement and says remaining work was only minor punchlist work
+- The tenant wants a draft notice asking for repair completion, service restoration, and commercial settlement talks
+
+Questions for the legal workflow:
+1. Is this a viable commercial lease dispute for initial intake?
+2. What documents should the client upload next?
+3. What should the first draft demand notice ask for?
+4. Which human approval steps should happen before sending anything to the client?

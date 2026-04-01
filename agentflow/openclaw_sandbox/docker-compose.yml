@@ -1,0 +1,22 @@
+services:
+  openclaw_bridge:
+    image: ghcr.io/example/openclaw-bridge:latest
+    container_name: openclaw_bridge
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      AGENTFLOW_API_BASE: http://host.docker.internal:8000
+      WECHAT_CONNECTOR_MODE: openclaw
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+    ports: []
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+# This is a scaffold only.
+# Replace the image and network policy with the actual OpenClaw runtime once selected.
