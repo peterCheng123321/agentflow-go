@@ -40,7 +40,7 @@ type Server struct {
 	jobs       map[string]*model.Job
 	jobsMu     sync.RWMutex
 	wsWriteMu  sync.Mutex // one writer at a time per connection (Gorilla WS); serializes all client writes
-	workerPool chan struct{}
+	workerPool *WorkerPool
 	processor  *processor.BatchProcessor
 	startTime  time.Time
 }
@@ -56,7 +56,6 @@ func New(cfg *config.Config) *Server {
 		startTime:  time.Now(),
 		clients:    make(map[*websocket.Conn]bool),
 		jobs:       make(map[string]*model.Job),
-		workerPool: make(chan struct{}, workers),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -88,6 +87,23 @@ func New(cfg *config.Config) *Server {
 
 	s.processor = processor.NewBatchProcessor(s.ocr, s, s, s.rag, s.workflow, s, cfg.MaxConcurrent)
 
+	wp := NewWorkerPool(workers)
+	wp.SetJobUpdater(func(id string, upd func(*model.Job)) {
+		s.updateJob(id, upd)
+	})
+	wp.SetAfterTerminal(func(j *model.Job) {
+		s.broadcastStatus()
+		jid := j.ID
+		go func() {
+			time.Sleep(5 * time.Second)
+			s.jobsMu.Lock()
+			delete(s.jobs, jid)
+			s.jobsMu.Unlock()
+			s.broadcastStatus()
+		}()
+	})
+	s.workerPool = wp
+
 	s.workflow.CreateCase("ClientX", "Commercial Lease Dispute", "Demo", "")
 
 	s.setupRoutes()
@@ -107,6 +123,9 @@ func (s *Server) BatchProcessor() *processor.BatchProcessor {
 }
 
 func (s *Server) Shutdown() {
+	if s.workerPool != nil {
+		s.workerPool.Shutdown()
+	}
 	s.llm.Unload()
 	s.ocr.Unload()
 
@@ -196,52 +215,14 @@ func (s *Server) submitJob(jobType string, fn func(job *model.Job) (any, error))
 
 	s.broadcastStatus()
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("job %s panic: %v", jobID, r)
-				s.updateJob(jobID, func(j *model.Job) {
-					j.Status = model.JobStatusFailed
-					j.Error = fmt.Sprintf("internal error: %v", r)
-					j.UpdatedAt = time.Now()
-				})
-				s.broadcastStatus()
-			}
-		}()
-
-		// Wait for slot in worker pool
-		s.workerPool <- struct{}{}
-		defer func() { <-s.workerPool }()
-
+	if err := s.workerPool.Enqueue(context.Background(), job, 0, fn); err != nil {
 		s.updateJob(jobID, func(j *model.Job) {
-			j.Status = model.JobStatusProcessing
-			j.UpdatedAt = time.Now()
-		})
-
-		result, err := fn(job)
-
-		s.updateJob(jobID, func(j *model.Job) {
-			if err != nil {
-				j.Status = model.JobStatusFailed
-				j.Error = err.Error()
-			} else {
-				j.Status = model.JobStatusCompleted
-				j.Result = result
-				j.Progress = 100
-			}
+			j.Status = model.JobStatusFailed
+			j.Error = err.Error()
 			j.UpdatedAt = time.Now()
 		})
 		s.broadcastStatus()
-
-		// Cleanup job after 5 seconds so it fades out of the UI
-		go func() {
-			time.Sleep(5 * time.Second)
-			s.jobsMu.Lock()
-			delete(s.jobs, jobID)
-			s.jobsMu.Unlock()
-			s.broadcastStatus()
-		}()
-	}()
+	}
 
 	return jobID
 }
