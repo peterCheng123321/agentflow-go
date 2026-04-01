@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1400" height="1050" viewBox="0 0 1400 1050" xmlns="http://www.w3.org/2000/svg" aria-labelledby="title desc" role="img">
+  <title id="title">LegalCaseAgent-HITL 流程图</title>
+  <desc id="desc">含 Human-in-the-Loop 验证的法律案件代理完整流程状态机</desc>
+  
+  <!-- 背景 -->
+  <rect width="1400" height="1050" fill="#f8fafc"/>
+  
+  <!-- 标题 -->
+  <text x="700" y="45" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="bold" fill="#1e2937">LegalCaseAgent-HITL 流程图</text>
+  <text x="700" y="72" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#64748b">从客户截取到文书交付 + Human-in-the-Loop 验证机制（2026版）</text>
+  
+  <!-- 图例 -->
+  <rect x="80" y="90" width="1240" height="48" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="110" y="118" font-family="Arial, sans-serif" font-size="13" fill="#475569">■ 自动状态</text>
+  <rect x="280" y="98" width="22" height="22" rx="4" fill="#3b82f6" stroke="#1e40af"/>
+  <text x="315" y="118" font-family="Arial, sans-serif" font-size="13" fill="#475569">强制 HITL 验证</text>
+  <rect x="520" y="98" width="22" height="22" rx="4" fill="#eab308" stroke="#ca8a04"/>
+  <text x="555" y="118" font-family="Arial, sans-serif" font-size="13" fill="#475569">可选 HITL</text>
+  <text x="780" y="118" font-family="Arial, sans-serif" font-size="13" fill="#475569">→ 箭头表示流程方向</text>
+
+  <!-- 节点 1: ClientCapture -->
+  <rect x="120" y="180" width="220" height="78" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="3"/>
+  <text x="230" y="212" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="600" fill="#1e40af">1. ClientCapture</text>
+  <text x="230" y="235" text-anchor="middle" font-family="Arial, sans-serif" font-size="12.5" fill="#64748b">第三方平台截取客户</text>
+  <text x="230" y="250" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#64748b">自动加微信</text>
+
+  <!-- 节点 2: InitialContact -->
+  <rect x="420" y="180" width="220" height="78" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="3"/>
+  <text x="530" y="212" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="600" fill="#1e40af">2. InitialContact</text>
+  <text x="530" y="235" text-anchor="middle" font-family="Arial, sans-serif" font-size="12.5" fill="#64748b">发送问诊模板</text>
+  <text x="530" y="250" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#64748b">收集案件大致信息</text>
+
+  <!-- 节点 3: CaseEvaluation + HITL -->
+  <rect x="720" y="180" width="220" height="78" rx="12" fill="#fef3c7" stroke="#eab308" stroke-width="3"/>
+  <text x="830" y="205" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#b45309">3. CaseEvaluation</text>
+  <text x="830" y="222" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#b45309">AI 评估是否可接案</text>
+  <rect x="795" y="235" width="70" height="18" rx="9" fill="#eab308"/>
+  <text x="830" y="248" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="600" fill="#78350f">HITL 验证</text>
+
+  <!-- 箭头 1→2 -->
+  <path d="M 345 219 L 410 219" fill="none" stroke="#64748b" stroke-width="2.5"/>
+  <polygon points="410,219 400,214 400,224" fill="#64748b"/>
+
+  <!-- 箭头 2→3 -->
+  <path d="M 645 219 L 710 219" fill="none" stroke="#64748b" stroke-width="2.5"/>
+  <polygon points="710,219 700,214 700,224" fill="#64748b"/>
+
+  <!-- 节点 4: FeeCollection -->
+  <rect x="1020" y="180" width="220" height="78" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="3"/>
+  <text x="1130" y="212" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="600" fill="#1e40af">4. FeeCollection</text>
+  <text x="1130" y="235" text-anchor="middle" font-family="Arial, sans-serif" font-size="12.5" fill="#64748b">发送收费标准</text>
+  <text x="1130" y="250" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#64748b">等待支付确认</text>
+
+  <!-- 箭头 3→4 -->
+  <path d="M 945 219 L 1010 219" fill="none" stroke="#64748b" stroke-width="2.5"/>
+  <polygon points="1010,219 1000,214 1000,224" fill="#64748b"/>
+
+  <!-- 节点 5: GroupCreation -->
+  <rect x="120" y="320" width="220" height="78" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="3"/>
+  <text x="230" y="352" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="600" fill="#1e40af">5. GroupCreation</text>
+  <text x="230" y="375" text-anchor="middle" font-family="Arial, sans-serif" font-size="12.5" fill="#64748b">创建微信群 + 拉人</text>
+
+  <!-- 箭头 4→5 -->
+  <path d="M 1245 219 L 1245 310 L 235 310 L 235 315" fill="none" stroke="#64748b" stroke-width="2.5"/>
+  <polygon points="235,315 230,305 240,305" fill="#64748b"/>
+
+  <!-- 节点 6: MaterialIngestion -->
+  <rect x="420" y="320" width="220" height="78" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="3"/>
+  <text x="530" y="352" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="600" fill="#1e40af">6. MaterialIngestion</text>
+  <text x="530" y="375" text-anchor="middle" font-family="Arial, sans-serif" font-size="12.5" fill="#64748b">接收并处理材料包</text>
+  <text x="530" y="390" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#64748b">(OCR + 结构化)</text>
+
+  <!-- 箭头 5→6 -->
+  <path d="M 345 359 L 410 359" fill="none" stroke="#64748b" stroke-width="2.5"/>
+  <polygon points="410,359 400,354 400,364" fill="#64748b"/>
+
+  <!-- 节点 7: DocumentGeneration -->
+  <rect x="720" y="320" width="220" height="78" rx="12" fill="#fef3c7" stroke="#eab308" stroke-width="3"/>
+  <text x="830" y="345" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#b45309">7. DocumentGeneration</text>
+  <text x="830" y="362" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#b45309">生成起诉状/仲裁书等</text>
+  <rect x="795" y="375" width="70" height="18" rx="9" fill="#eab308"/>
+  <text x="830" y="388" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="600" fill="#78350f">HITL 验证</text>
+
+  <!-- 箭头 6→7 -->
+  <path d="M 645 359 L 710 359" fill="none" stroke="#64748b" stroke-width="2.5"/>
+  <polygon points="710,359 700,354 700,364" fill="#64748b"/>
+
+  <!-- 节点 8: ClientApproval -->
+  <rect x="1020" y="320" width="220" height="78" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="3"/>
+  <text x="1130" y="352" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="600" fill="#1e40af">8. ClientApproval</text>
+  <text x="1130" y="375" text-anchor="middle" font-family="Arial, sans-serif" font-size="12.5" fill="#64748b">发送截屏版给客户</text>
+  <text x="1130" y="390" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#64748b">等待签字确认</text>
+
+  <!-- 箭头 7→8 -->
+  <path d="M 945 359 L 1010 359" fill="none" stroke="#64748b" stroke-width="2.5"/>
+  <polygon points="1010,359 1000,354 1000,364" fill="#64748b"/>
+
+  <!-- 节点 9: FinalPDF -->
+  <rect x="420" y="460" width="220" height="78" rx="12" fill="#fef3c7" stroke="#eab308" stroke-width="3"/>
+  <text x="530" y="485" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#b45309">9. FinalPDF&amp;Send</text>
+  <text x="530" y="502" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#b45309">生成正式 PDF</text>
+  <rect x="495" y="515" width="70" height="18" rx="9" fill="#eab308"/>
+  <text x="530" y="528" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="600" fill="#78350f">最终 HITL</text>
+
+  <!-- 箭头 8→9 -->
+  <path d="M 1130 403 L 1130 470 L 645 470 L 645 475" fill="none" stroke="#64748b" stroke-width="2.5"/>
+  <polygon points="645,475 640,465 650,465" fill="#64748b"/>
+
+  <!-- 节点 10: Archive -->
+  <rect x="720" y="460" width="220" height="78" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="3"/>
+  <text x="830" y="492" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="600" fill="#1e40af">10. Archive&amp;Close</text>
+  <text x="830" y="515" text-anchor="middle" font-family="Arial, sans-serif" font-size="12.5" fill="#64748b">打包归档 + 发送完成通知</text>
+
+  <!-- 箭头 9→10 -->
+  <path d="M 645 519 L 710 519" fill="none" stroke="#64748b" stroke-width="2.5"/>
+  <polygon points="710,519 700,514 700,524" fill="#64748b"/>
+
+  <!-- HITL 说明 -->
+  <rect x="80" y="580" width="1240" height="42" rx="8" fill="#fefce8" stroke="#facc15" stroke-width="2"/>
+  <text x="700" y="605" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="600" fill="#854d0e">Human-in-the-Loop 验证节点（律师必须审核通过才能继续）</text>
+  <text x="700" y="625" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#854d0e">强制节点：3（接案评估）、7（文书生成）、9（最终交付）</text>
+
+  <!-- 企业微信支持提示 -->
+  <rect x="1050" y="670" width="280" height="95" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+  <text x="1190" y="695" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="600" fill="#065f46">企业微信支持</text>
+  <text x="1190" y="715" text-anchor="middle" font-family="Arial, sans-serif" font-size="12.5" fill="#065f46">• 加好友 • 建群 • 收发文件</text>
+  <text x="1190" y="732" text-anchor="middle" font-family="Arial, sans-serif" font-size="12.5" fill="#065f46">• 交互卡片（HITL） • 会话存档</text>
+  <text x="1190" y="750" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#065f46">推荐使用企业微信实现自动化</text>
+
+  <!-- 结束 -->
+  <circle cx="830" cy="820" r="28" fill="#10b981" stroke="#065f46" stroke-width="4"/>
+  <text x="830" y="825" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="white">结束</text>
+  <text x="830" y="845" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#065f46">案件归档完成</text>
+
+  <!-- 结束箭头 -->
+  <path d="M 830 543 L 830 785" fill="none" stroke="#10b981" stroke-width="3" stroke-dasharray="6,3"/>
+  <polygon points="830,785 820,775 840,775" fill="#10b981"/>
+
+</svg>

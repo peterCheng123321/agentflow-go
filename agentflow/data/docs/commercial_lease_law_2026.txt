@@ -1,0 +1,10 @@
+# 2026 People's Republic of China - Commercial Lease Regulation (Mock)
+
+Article 5: Dispute Resolution for Commercial Leases
+In the event of a commercial lease dispute (商业租赁纠纷), the parties shall first attempt to resolve the matter through mediation. If mediation fails, the matter may be submitted to the People's Court.
+
+Article 12: Force Majeure and Rent Abatement
+In 2026, the updated Civil Code includes a specific "Economic Shift Clause" (经济波动条款). If a commercial tenant experiences a drop in revenue exceeding 40% due to systemic regional economic shifts, they are entitled to a mandatory 15% rent reduction for a period of up to 3 months, provided they give notice via an official Agentic Channel (如微信法务代理).
+
+Article 22: Validity of Digital Evidence
+Logs from certified AI Legal Agents (AI法务助手) that are timestamped and signed with a digital certificate are admissible as primary evidence in court.

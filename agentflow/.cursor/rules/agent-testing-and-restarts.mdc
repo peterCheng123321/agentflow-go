@@ -1,0 +1,24 @@
+---
+description: Agent runs tests and restarts services; do not defer to the user
+alwaysApply: true
+---
+
+# Testing and restarts are the agent’s job
+
+After meaningful code changes, **you** verify behavior—not the user.
+
+## What to do
+
+1. **Run tests** when the project has them (e.g. `go test ./...` from the relevant module root). If tests fail, fix or explain blockers and retry.
+2. **Restart long-running services** when backend or frontend assets they serve have changed (e.g. restart the Go app from `agentflow-go` after server or `frontend/` changes).
+3. **Check existing terminals** before starting duplicate servers; stop or use a different port if something is already bound.
+4. **Smoke-check** when useful: hit `/health` or `/v1/status` (or the app’s documented endpoints) after a restart; for UI work, note that `agentflow-go` serves `./frontend` relative to the process working directory—run from the correct directory so the browser loads the updated UI.
+5. **Do not** end with “restart the server yourself” or “run tests locally” as the only outcome unless the environment truly cannot run commands (then say what blocked you).
+
+## Anti-patterns
+
+- Shipping a diff with “you should test this” and no executed verification.
+- Assuming the user will restart processes you changed.
+- Editing only `agentflow/frontend/index.html` while the running app serves `agentflow-go/frontend/` without calling that out or aligning paths.
+
+Keep verification proportional: small typo fixes may need only `go build`; larger server/WS/RAG changes warrant test + restart + quick HTTP check.
