@@ -101,6 +101,11 @@ func (s *Server) Router() http.Handler {
 	})
 }
 
+// BatchProcessor exposes the batch processor for benchmarks and integration tests.
+func (s *Server) BatchProcessor() *processor.BatchProcessor {
+	return s.processor
+}
+
 func (s *Server) Shutdown() {
 	s.llm.Unload()
 	s.ocr.Unload()
@@ -674,6 +679,40 @@ func (s *Server) resolveCaseForDocument(clientName, matterType, logicalName stri
 	return c.CaseID
 }
 
+// attachBatchUploadsToCase records workflow attachments for uploads that were ingested without a case_id.
+func (s *Server) attachBatchUploadsToCase(caseID string, uploaded interface{}) {
+	if caseID == "" {
+		return
+	}
+	names, ok := uploaded.([]string)
+	if !ok || len(names) == 0 {
+		return
+	}
+	for _, name := range names {
+		s.workflow.AttachDocument(caseID, name)
+	}
+}
+
+// allowedDirectoryUnderDataDir returns an absolute path only if dir is contained within DataDir (no path escape).
+func (s *Server) allowedDirectoryUnderDataDir(dir string) (string, error) {
+	absBase, err := filepath.Abs(s.cfg.DataDir)
+	if err != nil {
+		return "", err
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absBase, absDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid directory path")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("directory must be under server data directory %s", absBase)
+	}
+	return absDir, nil
+}
+
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
@@ -915,9 +954,7 @@ func (s *Server) processBatchUpload(j *model.Job, files []string, reqCaseID stri
 
 		targetCaseID := s.resolveCaseForDocument(clientName, matterType, "Batch Root")
 		res["case_id"] = targetCaseID
-
-		// If we wanted to re-attach documents to the resolved case, we'd do it here.
-		// For now, let's just update the response.
+		s.attachBatchUploadsToCase(targetCaseID, res["uploaded"])
 	}
 
 	return result, nil
@@ -938,8 +975,14 @@ func (s *Server) handleUploadDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	allowedDir, err := s.allowedDirectoryUnderDataDir(req.DirectoryPath)
+	if err != nil {
+		s.writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
 	var files []string
-	err := filepath.WalkDir(req.DirectoryPath, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(allowedDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -970,6 +1013,7 @@ func (s *Server) handleUploadDirectory(w http.ResponseWriter, r *http.Request) {
 		if clientName != "" && clientName != "Unknown Client" {
 			targetCaseID := s.resolveCaseForDocument(clientName, matterType, "Directory Root")
 			res["case_id"] = targetCaseID
+			s.attachBatchUploadsToCase(targetCaseID, res["uploaded"])
 		}
 
 		return result, nil

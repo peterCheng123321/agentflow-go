@@ -409,6 +409,26 @@ func TestHandleUploadDirectoryInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestHandleUploadDirectoryRejectsPathOutsideDataDir(t *testing.T) {
+	tempDir := t.TempDir()
+	cfg := &config.Config{
+		DataDir:        tempDir,
+		IsAppleSilicon: false,
+		OllamaURL:      "http://localhost:11434",
+	}
+	s := New(cfg)
+
+	body := `{"directory_path":"/tmp"}`
+	req := httptest.NewRequest("POST", "/v1/upload/directory", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", rr.Code)
+	}
+}
+
 func TestHandleSearchInvalidMethod(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{
