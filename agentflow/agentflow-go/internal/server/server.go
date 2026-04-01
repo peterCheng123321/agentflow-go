@@ -2,6 +2,7 @@ package server
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +20,7 @@ import (
 	"agentflow-go/internal/llm"
 	"agentflow-go/internal/model"
 	"agentflow-go/internal/ocr"
+	"agentflow-go/internal/processor"
 	"agentflow-go/internal/rag"
 	"agentflow-go/internal/workflow"
 
@@ -39,7 +40,8 @@ type Server struct {
 	jobs       map[string]*model.Job
 	jobsMu     sync.RWMutex
 	wsWriteMu  sync.Mutex // one writer at a time per connection (Gorilla WS); serializes all client writes
-	workerPool chan struct{}
+	workerPool *WorkerPool
+	processor  *processor.BatchProcessor
 	startTime  time.Time
 }
 
@@ -54,7 +56,6 @@ func New(cfg *config.Config) *Server {
 		startTime:  time.Now(),
 		clients:    make(map[*websocket.Conn]bool),
 		jobs:       make(map[string]*model.Job),
-		workerPool: make(chan struct{}, workers),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -68,12 +69,16 @@ func New(cfg *config.Config) *Server {
 		log.Fatal("LLM backend is dashscope but no API key: set AGENTFLOW_DASHSCOPE_API_KEY or DASHSCOPE_API_KEY, AGENTFLOW_DASHSCOPE_API_KEY_FILE, or create data/secrets/dashscope_api_key.txt (see data/secrets/dashscope_api_key.txt.example)")
 	}
 
+	llmOpts := []llm.Option{}
+	if cfg.LLMCacheEnabled && cfg.LLMCacheDir != "" {
+		llmOpts = append(llmOpts, llm.WithResponseCache(cfg.LLMCacheDir, true))
+	}
 	switch cfg.LLMBackend {
 	case "dashscope":
-		s.llm = llm.NewProvider(cfg.ModelName, cfg.DashScopeBaseURL, cfg.DashScopeAPIKey, llm.BackendOpenAICompat)
+		s.llm = llm.NewProvider(cfg.ModelName, cfg.DashScopeBaseURL, cfg.DashScopeAPIKey, llm.BackendOpenAICompat, llmOpts...)
 		s.ocr = ocr.NewEngine(cfg.OCRModelID, cfg.DashScopeBaseURL, cfg.DashScopeAPIKey, ocr.BackendOpenAICompat, cfg.MaxConcurrent, 10*time.Minute)
 	default:
-		s.llm = llm.NewProvider(cfg.ModelName, cfg.OllamaURL, "", llm.BackendOllama)
+		s.llm = llm.NewProvider(cfg.ModelName, cfg.OllamaURL, "", llm.BackendOllama, llmOpts...)
 		s.ocr = ocr.NewEngine(cfg.OCRModelID, cfg.OllamaURL, "", ocr.BackendOllama, cfg.MaxConcurrent, 5*time.Minute)
 	}
 
@@ -88,6 +93,25 @@ func New(cfg *config.Config) *Server {
 		go s.broadcastStatus()
 	})
 
+	s.processor = processor.NewBatchProcessor(s.ocr, s, s, s.rag, s.workflow, s, cfg.MaxConcurrent)
+
+	wp := NewWorkerPool(workers)
+	wp.SetJobUpdater(func(id string, upd func(*model.Job)) {
+		s.updateJob(id, upd)
+	})
+	wp.SetAfterTerminal(func(j *model.Job) {
+		s.broadcastStatus()
+		jid := j.ID
+		go func() {
+			time.Sleep(5 * time.Second)
+			s.jobsMu.Lock()
+			delete(s.jobs, jid)
+			s.jobsMu.Unlock()
+			s.broadcastStatus()
+		}()
+	})
+	s.workerPool = wp
+
 	s.workflow.CreateCase("ClientX", "Commercial Lease Dispute", "Demo", "")
 
 	s.setupRoutes()
@@ -101,7 +125,15 @@ func (s *Server) Router() http.Handler {
 	})
 }
 
+// BatchProcessor exposes the batch processor for benchmarks and integration tests.
+func (s *Server) BatchProcessor() *processor.BatchProcessor {
+	return s.processor
+}
+
 func (s *Server) Shutdown() {
+	if s.workerPool != nil {
+		s.workerPool.Shutdown()
+	}
 	s.llm.Unload()
 	s.ocr.Unload()
 
@@ -191,52 +223,14 @@ func (s *Server) submitJob(jobType string, fn func(job *model.Job) (any, error))
 
 	s.broadcastStatus()
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("job %s panic: %v", jobID, r)
-				s.updateJob(jobID, func(j *model.Job) {
-					j.Status = model.JobStatusFailed
-					j.Error = fmt.Sprintf("internal error: %v", r)
-					j.UpdatedAt = time.Now()
-				})
-				s.broadcastStatus()
-			}
-		}()
-
-		// Wait for slot in worker pool
-		s.workerPool <- struct{}{}
-		defer func() { <-s.workerPool }()
-
+	if err := s.workerPool.Enqueue(context.Background(), job, 0, fn); err != nil {
 		s.updateJob(jobID, func(j *model.Job) {
-			j.Status = model.JobStatusProcessing
-			j.UpdatedAt = time.Now()
-		})
-
-		result, err := fn(job)
-
-		s.updateJob(jobID, func(j *model.Job) {
-			if err != nil {
-				j.Status = model.JobStatusFailed
-				j.Error = err.Error()
-			} else {
-				j.Status = model.JobStatusCompleted
-				j.Result = result
-				j.Progress = 100
-			}
+			j.Status = model.JobStatusFailed
+			j.Error = err.Error()
 			j.UpdatedAt = time.Now()
 		})
 		s.broadcastStatus()
-
-		// Cleanup job after 5 seconds so it fades out of the UI
-		go func() {
-			time.Sleep(5 * time.Second)
-			s.jobsMu.Lock()
-			delete(s.jobs, jobID)
-			s.jobsMu.Unlock()
-			s.broadcastStatus()
-		}()
-	}()
+	}
 
 	return jobID
 }
@@ -247,6 +241,36 @@ func (s *Server) updateJob(id string, fn func(*model.Job)) {
 	if j, ok := s.jobs[id]; ok {
 		fn(j)
 	}
+}
+
+// Processor interface implementations
+
+func (s *Server) UpdateJob(id string, fn func(*model.Job)) {
+	s.updateJob(id, fn)
+}
+
+func (s *Server) Classify(ctx context.Context, text, filename string) (map[string]interface{}, error) {
+	res := s.classifyLegalDocumentFromOCR(text, filename)
+	if res == nil {
+		return nil, fmt.Errorf("classification returned nil")
+	}
+	return res, nil
+}
+
+func (s *Server) AnalyzeBatch(ctx context.Context, docs map[string]string) (processor.BatchMeta, error) {
+	raw := s.analyzeBatchFromOCR(docs)
+	meta := processor.BatchMeta{
+		ClientName: raw.ClientName,
+		MatterType: raw.MatterType,
+		Files:      make([]processor.FileMeta, len(raw.Files)),
+	}
+	for i, f := range raw.Files {
+		meta.Files[i] = processor.FileMeta{
+			Filename:     f.Filename,
+			DocumentType: f.DocumentType,
+		}
+	}
+	return meta, nil
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -740,6 +764,40 @@ func (s *Server) resolveCaseForDocument(clientName, matterType, logicalName stri
 	return c.CaseID
 }
 
+// attachBatchUploadsToCase records workflow attachments for uploads that were ingested without a case_id.
+func (s *Server) attachBatchUploadsToCase(caseID string, uploaded interface{}) {
+	if caseID == "" {
+		return
+	}
+	names, ok := uploaded.([]string)
+	if !ok || len(names) == 0 {
+		return
+	}
+	for _, name := range names {
+		s.workflow.AttachDocument(caseID, name)
+	}
+}
+
+// allowedDirectoryUnderDataDir returns an absolute path only if dir is contained within DataDir (no path escape).
+func (s *Server) allowedDirectoryUnderDataDir(dir string) (string, error) {
+	absBase, err := filepath.Abs(s.cfg.DataDir)
+	if err != nil {
+		return "", err
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absBase, absDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid directory path")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("directory must be under server data directory %s", absBase)
+	}
+	return absDir, nil
+}
+
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
@@ -961,210 +1019,30 @@ func (s *Server) handleUploadBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) processBatchUpload(j *model.Job, files []string, reqCaseID string) (any, error) {
-	var uploaded []string
-	var failed []string
-	var mu sync.Mutex
-	var targetCaseID string
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
 
-	total := len(files)
-	var completed int
-
-	ocrResults := make(map[string]string)
-
-	var wg sync.WaitGroup
-	concurrencyLimit := s.cfg.MaxConcurrent * 2
-	if concurrencyLimit < 4 {
-		concurrencyLimit = 4
-	}
-	sem := make(chan struct{}, concurrencyLimit)
-
-	s.updateJob(j.ID, func(job *model.Job) { job.Progress = 5 })
-
-	for _, filePath := range files {
-		wg.Add(1)
-		sem <- struct{}{}
-
-		go func(path string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			fileName := filepath.Base(path)
-			// Remove the timestamp prefix for display purposes if present
-			displayFileName := fileName
-			if parts := strings.SplitN(fileName, "-", 2); len(parts) == 2 && len(parts[0]) > 10 {
-				displayFileName = parts[1]
-			}
-
-			text, err := s.ocr.ScanFile(path)
-
-			mu.Lock()
-			completed++
-			s.updateJob(j.ID, func(job *model.Job) {
-				job.Progress = 5 + int(float64(completed)/float64(total)*45) // First 50% is OCR
-			})
-			if err != nil {
-				log.Printf("OCR failed for %s: %v", displayFileName, err)
-				failed = append(failed, displayFileName)
-			} else {
-				ocrResults[displayFileName] = text
-			}
-			mu.Unlock()
-		}(filePath)
+	opts := processor.Options{
+		CaseID: reqCaseID,
 	}
 
-	wg.Wait()
-	log.Printf("[batch] OCR complete for %d files. Starting analysis...", len(ocrResults))
-
-	s.updateJob(j.ID, func(job *model.Job) { job.Progress = 60 })
-
-	// --- Optimized Batch Context Selection ---
-	// Instead of sending snippets of all 45 files, rank them and pick the "Golden Files"
-	type rankedFile struct {
-		name  string
-		text  string
-		score int
-	}
-	var ranked []rankedFile
-	for name, text := range ocrResults {
-		score := len(text) / 100 // Base score on length
-		lower := strings.ToLower(name)
-		if strings.Contains(lower, "起诉") || strings.Contains(lower, "complaint") {
-			score += 500
-		}
-		if strings.Contains(lower, "身份证") || strings.Contains(lower, "id_card") {
-			score += 400
-		}
-		if strings.Contains(lower, "合同") || strings.Contains(lower, "contract") {
-			score += 300
-		}
-		if strings.Contains(lower, "欠条") || strings.Contains(lower, "iou") {
-			score += 300
-		}
-		if strings.Contains(lower, "律师函") || strings.Contains(lower, "lawyer") {
-			score += 300
-		}
-		if strings.HasSuffix(lower, ".docx") {
-			score += 200
-		}
-
-		ranked = append(ranked, rankedFile{name, text, score})
-	}
-	// Sort by score descending
-	sort.Slice(ranked, func(i, j int) bool { return ranked[i].score > ranked[j].score })
-
-	// Select top 12 files for the LLM to analyze the case context
-	selectedDocs := make(map[string]string)
-	limit := 12
-	if len(ranked) < limit {
-		limit = len(ranked)
-	}
-	for i := 0; i < limit; i++ {
-		selectedDocs[ranked[i].name] = ranked[i].text
+	result, err := s.processor.ProcessBatch(ctx, j.ID, files, opts)
+	if err != nil {
+		return nil, err
 	}
 
-	log.Printf("[batch] Selected %d/%d top files for case synthesis", limit, len(ocrResults))
+	// Post-processing for empty CaseID (automatic routing)
+	if reqCaseID == "" {
+		res := result.(map[string]interface{})
+		clientName, _ := res["client_name"].(string)
+		matterType, _ := res["matter_type"].(string)
 
-	// Run single LLM call for the entire batch context
-	batchMeta := s.analyzeBatchFromOCR(selectedDocs)
-	log.Printf("[batch] Batch analysis complete. Clusters: %d", len(batchMeta.Files))
-
-	s.updateJob(j.ID, func(job *model.Job) { job.Progress = 80 })
-
-	// --- Multi-Case Resolution ---
-	fileToCaseID := make(map[string]string)
-	if reqCaseID != "" {
-		for fileName := range ocrResults {
-			fileToCaseID[fileName] = reqCaseID
-		}
-		targetCaseID = reqCaseID
-	} else {
-		// batchMeta.ClientName is the primary/root case
-		defaultCaseID := s.resolveCaseForDocument(batchMeta.ClientName, batchMeta.MatterType, "Batch Root")
-		targetCaseID = defaultCaseID
-		for _, f := range batchMeta.Files {
-			// If LLM found a specific human client for this file, use it
-			if f.ClientName != "" && f.ClientName != "Unknown Client" && f.ClientName != batchMeta.ClientName {
-				fileToCaseID[f.Filename] = s.resolveCaseForDocument(f.ClientName, f.MatterType, f.Filename)
-			} else {
-				fileToCaseID[f.Filename] = defaultCaseID
-			}
-		}
+		targetCaseID := s.resolveCaseForDocument(clientName, matterType, "Batch Root")
+		res["case_id"] = targetCaseID
+		s.attachBatchUploadsToCase(targetCaseID, res["uploaded"])
 	}
 
-	// Map classifications
-	classMap := make(map[string]map[string]interface{})
-	for _, f := range batchMeta.Files {
-		entities := map[string]interface{}{}
-		p := f.Plaintiffs
-		if len(p) == 0 {
-			p = batchMeta.Plaintiffs
-		}
-		d := f.Defendants
-		if len(d) == 0 {
-			d = batchMeta.Defendants
-		}
-
-		if len(p) > 0 {
-			entities["plaintiffs"] = p
-		}
-		if len(d) > 0 {
-			entities["defendants"] = d
-		}
-
-		classMap[f.Filename] = map[string]interface{}{
-			"document_type":   f.DocumentType,
-			"display_name_zh": f.DisplayNameZH,
-			"summary_zh":      f.SummaryZH,
-			"entities":        entities,
-			"source":          "llm_batch",
-		}
-	}
-
-	// Ingest into RAG and Attach to Case
-	for i, filePath := range files {
-		fileName := filepath.Base(filePath)
-		displayFileName := fileName
-		if parts := strings.SplitN(fileName, "-", 2); len(parts) == 2 && len(parts[0]) > 10 {
-			displayFileName = parts[1]
-		}
-
-		if text, ok := ocrResults[displayFileName]; ok {
-			meta := map[string]interface{}{
-				"filename": displayFileName,
-			}
-			if cls, exists := classMap[displayFileName]; exists {
-				meta["classification"] = cls
-			}
-
-			if err := s.rag.IngestFile(filePath, text, meta); err != nil {
-				failed = append(failed, displayFileName)
-			} else {
-				uploaded = append(uploaded, displayFileName)
-				targetCaseID := fileToCaseID[displayFileName]
-				if targetCaseID == "" {
-					targetCaseID = s.resolveCaseForDocument(batchMeta.ClientName, batchMeta.MatterType, displayFileName)
-				}
-
-				if cls, exists := classMap[displayFileName]; exists {
-					s.workflow.AttachDocument(targetCaseID, displayFileName, map[string]interface{}{
-						"classification": cls,
-					})
-				} else {
-					s.workflow.AttachDocument(targetCaseID, displayFileName)
-				}
-			}
-		}
-		s.updateJob(j.ID, func(job *model.Job) {
-			job.Progress = 80 + int(float64(i)/float64(total)*20)
-		})
-	}
-
-	return map[string]interface{}{
-		"uploaded": uploaded,
-		"failed":   failed,
-		"count":    len(uploaded),
-		"case_id":  targetCaseID,
-	}, nil
+	return result, nil
 }
 
 func (s *Server) handleUploadDirectory(w http.ResponseWriter, r *http.Request) {
@@ -1182,8 +1060,14 @@ func (s *Server) handleUploadDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	allowedDir, err := s.allowedDirectoryUnderDataDir(req.DirectoryPath)
+	if err != nil {
+		s.writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
 	var files []string
-	err := filepath.WalkDir(req.DirectoryPath, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(allowedDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -1199,116 +1083,25 @@ func (s *Server) handleUploadDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jobID := s.submitJob("directory_upload", func(j *model.Job) (any, error) {
-		var uploaded []string
-		var failed []string
-		var mu sync.Mutex
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
 
-		total := len(files)
-		var completed int
-
-		var primaryCaseID string
-		var primaryClientName string
-		var primaryMatterType string
-
-		// Pre-scan to find a primary file (e.g. a docx or a named file) to establish case context
-		var bestFile string
-		for _, path := range files {
-			name := filepath.Base(path)
-			if strings.HasSuffix(strings.ToLower(name), ".docx") {
-				bestFile = path
-				break
-			}
-			if bestFile == "" {
-				ext := strings.ToLower(filepath.Ext(name))
-				if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" {
-					bestFile = path
-				}
-			}
+		result, err := s.processor.ProcessBatch(ctx, j.ID, files, processor.Options{})
+		if err != nil {
+			return nil, err
 		}
 
-		if bestFile != "" {
-			s.updateJob(j.ID, func(job *model.Job) { job.Progress = 5 })
-			text, _ := s.ocr.ScanFile(bestFile)
-			baseName := filepath.Base(bestFile)
-			primaryClientName, primaryMatterType, _ = s.inferIntakeFromOCR(text, baseName)
-			primaryCaseID = s.resolveCaseForDocument(primaryClientName, primaryMatterType, baseName)
+		res := result.(map[string]interface{})
+		clientName, _ := res["client_name"].(string)
+		matterType, _ := res["matter_type"].(string)
+
+		if clientName != "" && clientName != "Unknown Client" {
+			targetCaseID := s.resolveCaseForDocument(clientName, matterType, "Directory Root")
+			res["case_id"] = targetCaseID
+			s.attachBatchUploadsToCase(targetCaseID, res["uploaded"])
 		}
 
-		var wg sync.WaitGroup
-		concurrencyLimit := s.cfg.MaxConcurrent * 2
-		if concurrencyLimit < 4 {
-			concurrencyLimit = 4
-		}
-		sem := make(chan struct{}, concurrencyLimit)
-
-		for _, filePath := range files {
-			wg.Add(1)
-			sem <- struct{}{}
-
-			go func(path string) {
-				defer wg.Done()
-				defer func() { <-sem }()
-
-				fileName := filepath.Base(path)
-				text, err := s.ocr.ScanFile(path)
-
-				mu.Lock()
-				completed++
-				s.updateJob(j.ID, func(job *model.Job) {
-					job.Progress = int(float64(completed) / float64(total) * 100)
-				})
-				mu.Unlock()
-
-				if err != nil {
-					log.Printf("OCR failed for %s: %v", fileName, err)
-					mu.Lock()
-					failed = append(failed, fileName)
-					mu.Unlock()
-					return
-				}
-
-				meta := map[string]interface{}{
-					"filename": fileName,
-				}
-				var classification map[string]interface{}
-				if cls := s.classifyLegalDocumentFromOCR(text, fileName); cls != nil {
-					meta["classification"] = cls
-					classification = cls
-				}
-				if err := s.rag.IngestFile(path, text, meta); err != nil {
-					mu.Lock()
-					failed = append(failed, fileName)
-					mu.Unlock()
-					return
-				}
-
-				mu.Lock()
-				uploaded = append(uploaded, fileName)
-				targetCaseID := primaryCaseID
-				if targetCaseID == "" {
-					clientName, matterType, _ := s.inferIntakeFromOCR(text, fileName)
-					targetCaseID = s.resolveCaseForDocument(clientName, matterType, fileName)
-				}
-
-				if classification != nil {
-					s.workflow.AttachDocument(targetCaseID, fileName, map[string]interface{}{
-						"classification": classification,
-					})
-				} else {
-					s.workflow.AttachDocument(targetCaseID, fileName)
-				}
-				mu.Unlock()
-			}(filePath)
-		}
-
-		wg.Wait()
-
-		return map[string]interface{}{
-			"uploaded": uploaded,
-			"failed":   failed,
-			"count":    len(uploaded),
-			"case_id":  primaryCaseID,
-		}, nil
+		return result, nil
 	})
 
 	s.writeJSON(w, http.StatusAccepted, map[string]interface{}{
@@ -1671,21 +1464,25 @@ func sanitizeUploadedBasename(name string) string {
 }
 
 func extractMatterType(filename string) string {
-	hints := map[string]string{
-		"买卖": "Sales Contract Dispute",
-		"合同": "Contract Dispute",
-		"欠款": "Debt Dispute",
-		"借贷": "Loan Dispute",
-		"租赁": "Lease Dispute",
-		"劳务": "Labor Dispute",
-		"劳动": "Labor Dispute",
-		"起诉": "Civil Litigation",
-		"诉讼": "Civil Litigation",
+	type hint struct {
+		keyword string
+		matter  string
+	}
+	hints := []hint{
+		{"买卖", "Sales Contract Dispute"},
+		{"租赁", "Lease Dispute"},
+		{"劳务", "Labor Dispute"},
+		{"劳动", "Labor Dispute"},
+		{"借贷", "Loan Dispute"},
+		{"欠款", "Debt Dispute"},
+		{"合同", "Contract Dispute"},
+		{"起诉", "Civil Litigation"},
+		{"诉讼", "Civil Litigation"},
 	}
 
-	for keyword, matter := range hints {
-		if strings.Contains(filename, keyword) {
-			return matter
+	for _, h := range hints {
+		if strings.Contains(filename, h.keyword) {
+			return h.matter
 		}
 	}
 
