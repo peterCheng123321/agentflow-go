@@ -275,6 +275,13 @@ async function renderCaseWorkspace(caseId) {
     let notesHtml = notes.slice().reverse().map(n=>`<div class="note-item"><div class="note-text">${esc(n.text)}</div><div class="note-time">${new Date(n.timestamp).toLocaleString()}</div></div>`).join('');
     if(!notesHtml) notesHtml='<div style="font-size:10px;color:var(--text-3);text-align:center;padding:8px">No notes</div>';
 
+    const summary = c.ai_case_summary || 'No summary generated yet.';
+    const docs = c.uploaded_documents || [];
+    let docsHtml = docs.length ? docs.map(d=>`<div style="display:flex;align-items:center;padding:12px;background:var(--bg-0);border:1px solid var(--glass-border);border-radius:var(--radius-sm);margin-bottom:8px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--glass-border)'" onclick="viewDocument('${escA(d)}')"><div style="width:36px;height:36px;border-radius:10px;background:var(--bg-3);display:flex;align-items:center;justify-content:center;margin-right:12px;">${ICONS.doc}</div><div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:var(--text-0);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(d)}</div><div style="font-size:10px;color:var(--text-2);">Uploaded document</div></div><div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()"><button type="button" title="Move to another case" onclick="openReassignModal('${escA(c.case_id)}','${escA(d)}')" style="padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text-2);" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-2)'">${ICONS.move}</button><button type="button" title="Delete" onclick="deleteDocument('${escA(c.case_id)}','${escA(d)}')" style="padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text-2);" onmouseover="this.style.color='var(--rose)'" onmouseout="this.style.color='var(--text-2)'">${ICONS.trash}</button></div></div>`).join('') : '<div style="padding:24px;text-align:center;font-size:12px;color:var(--text-3);background:var(--glass);border-radius:var(--radius-sm);">No documents uploaded yet.</div>';
+
+    const elWsId = document.getElementById('ws-case-id');
+    if (elWsId) elWsId.textContent = c.case_id;
+
     document.getElementById('ws-main-grid').innerHTML = `
         ${hitlHtml}
         
