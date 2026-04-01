@@ -445,3 +445,37 @@ func (e *Engine) evictOldest() {
 		delete(e.cases, oldestID)
 	}
 }
+
+// SetDraftPreview stores the rendered draft text (markdown/plain) for a case.
+func (e *Engine) SetDraftPreview(caseID, content string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	c, ok := e.cases[caseID]
+	if !ok {
+		return fmt.Errorf("case not found")
+	}
+	c.DraftPreview = content
+	c.UpdatedAt = time.Now()
+	if e.onChange != nil {
+		go e.onChange()
+	}
+	return nil
+}
+
+// SetDocumentDraft stores the structured draft (sections + highlights with evidence links).
+func (e *Engine) SetDocumentDraft(caseID string, draft map[string]interface{}) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	c, ok := e.cases[caseID]
+	if !ok {
+		return fmt.Errorf("case not found")
+	}
+	c.DocumentDraft = draft
+	c.UpdatedAt = time.Now()
+	if e.onChange != nil {
+		go e.onChange()
+	}
+	return nil
+}
