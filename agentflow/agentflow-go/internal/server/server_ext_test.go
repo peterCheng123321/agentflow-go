@@ -713,3 +713,86 @@ func TestHandleRAGSummary(t *testing.T) {
 		t.Errorf("expected 200, got %d", rr.Code)
 	}
 }
+
+func TestHandleDraftGetAndSave(t *testing.T) {
+	tempDir := t.TempDir()
+	cfg := &config.Config{
+		DataDir:        tempDir,
+		IsAppleSilicon: false,
+		OllamaURL:      "http://localhost:11434",
+	}
+	s := New(cfg)
+	c := s.workflow.CreateCase("DraftClient", "Civil Litigation", "src", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/cases/"+c.CaseID+"/draft", nil)
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET draft: %d %s", rr.Code, rr.Body.String())
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["case_id"] != c.CaseID {
+		t.Errorf("case_id = %v, want %s", got["case_id"], c.CaseID)
+	}
+
+	saveBody := map[string]interface{}{
+		"draft": map[string]interface{}{
+			"title": "Test Title",
+			"sections": []interface{}{
+				map[string]interface{}{
+					"id": "s1", "title": "Section A", "content": "Body text",
+					"highlights": []interface{}{
+						map[string]interface{}{
+							"text": "Body", "reason": "verify", "category": "fact",
+							"source_file": "memo.pdf", "source_ref": "excerpt",
+						},
+					},
+				},
+			},
+		},
+		"preview": "# Test Title\n\n## Section A\n\nBody text",
+	}
+	raw, _ := json.Marshal(saveBody)
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/cases/"+c.CaseID+"/draft/save", bytes.NewReader(raw))
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("POST save: %d %s", rr2.Code, rr2.Body.String())
+	}
+
+	snap, ok := s.workflow.GetCaseSnapshot(c.CaseID)
+	if !ok {
+		t.Fatal("case missing after save")
+	}
+	if snap.DraftPreview == "" {
+		t.Error("expected DraftPreview set")
+	}
+	if snap.DocumentDraft == nil {
+		t.Fatal("expected DocumentDraft set")
+	}
+	if snap.DocumentDraft["title"] != "Test Title" {
+		t.Errorf("draft title = %v", snap.DocumentDraft["title"])
+	}
+}
+
+func TestWsLoopbackEquivalent(t *testing.T) {
+	tests := []struct {
+		a, b  string
+		want  bool
+	}{
+		{"localhost:8000", "127.0.0.1:8000", true},
+		{"127.0.0.1:8000", "[::1]:8000", true},
+		{"localhost:8000", "127.0.0.1:9000", false},
+		{"example.com:8000", "127.0.0.1:8000", false},
+		{"localhost", "127.0.0.1", true},
+	}
+	for _, tc := range tests {
+		if got := wsLoopbackEquivalent(tc.a, tc.b); got != tc.want {
+			t.Errorf("wsLoopbackEquivalent(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

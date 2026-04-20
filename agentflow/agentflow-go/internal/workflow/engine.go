@@ -1,7 +1,10 @@
 package workflow
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -48,18 +51,106 @@ var hitlGateLabels = map[string]string{
 	StateFinalPDFSend:       "Final PDF delivery",
 }
 
-type Engine struct {
-	mu     sync.RWMutex
-	cases  map[string]*model.Case
-	maxCases int
-	onChange func()
+// persistedStore holds the serializable case data for persistence
+type persistedStore struct {
+	Cases map[string]*model.Case `json:"cases"`
 }
 
-func NewEngine(maxCases int, onChange func()) *Engine {
-	return &Engine{
-		cases:    make(map[string]*model.Case),
-		maxCases: maxCases,
-		onChange: onChange,
+type Engine struct {
+	mu         sync.RWMutex
+	cases      map[string]*model.Case
+	maxCases   int
+	persistDir string
+	onChange   func()
+}
+
+func NewEngine(maxCases int, persistDir string, onChange func()) *Engine {
+	e := &Engine{
+		cases:      make(map[string]*model.Case),
+		maxCases:   maxCases,
+		persistDir: persistDir,
+		onChange:   onChange,
+	}
+	e.loadStore()
+	return e
+}
+
+// loadStore restores cases from disk on startup
+func (e *Engine) loadStore() {
+	if e.persistDir == "" {
+		return
+	}
+	storePath := filepath.Join(e.persistDir, "cases.json")
+	data, err := os.ReadFile(storePath)
+	if err != nil {
+		// No existing store file - start fresh
+		return
+	}
+
+	var ps persistedStore
+	if err := json.Unmarshal(data, &ps); err != nil {
+		// Corrupted data - log and start fresh
+		return
+	}
+
+	if ps.Cases != nil {
+		e.cases = ps.Cases
+	}
+}
+
+// saveStore persists the current cases map to disk
+// Must be called while holding the write lock (e.mu.Lock())
+func (e *Engine) saveStoreLocked() {
+	if e.persistDir == "" {
+		return
+	}
+	os.MkdirAll(e.persistDir, 0755)
+	storePath := filepath.Join(e.persistDir, "cases.json")
+
+	ps := persistedStore{
+		Cases: e.cases,
+	}
+
+	data, err := json.Marshal(ps)
+	if err != nil {
+		return
+	}
+
+	tmpPath := storePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return
+	}
+	if err := os.Rename(tmpPath, storePath); err != nil {
+		os.Remove(tmpPath)
+	}
+}
+
+// saveStore acquires a read lock and persists the current cases map to disk
+func (e *Engine) saveStore() {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if e.persistDir == "" {
+		return
+	}
+	os.MkdirAll(e.persistDir, 0755)
+	storePath := filepath.Join(e.persistDir, "cases.json")
+
+	ps := persistedStore{
+		Cases: e.cases,
+	}
+
+	data, err := json.Marshal(ps)
+	if err != nil {
+		return
+	}
+
+	tmpPath := storePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return
+	}
+	if err := os.Rename(tmpPath, storePath); err != nil {
+		os.Remove(tmpPath)
 	}
 }
 
@@ -133,6 +224,7 @@ func (e *Engine) CreateCase(clientName, matterType, sourceChannel, initialMsg st
 	if e.onChange != nil {
 		go e.onChange()
 	}
+	e.saveStore()
 
 	return snapshot
 }
@@ -168,12 +260,12 @@ func (e *Engine) ListCases() []model.Case {
 func (e *Engine) AdvanceState(caseID string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	c, ok := e.cases[caseID]
 	if !ok {
 		return fmt.Errorf("case not found: %s", caseID)
 	}
-	
+
 	currentIdx := -1
 	for i, state := range stateOrder {
 		if state == c.State {
@@ -181,18 +273,18 @@ func (e *Engine) AdvanceState(caseID string) error {
 			break
 		}
 	}
-	
+
 	if currentIdx < 0 || currentIdx >= len(stateOrder)-1 {
 		return fmt.Errorf("cannot advance from state: %s", c.State)
 	}
-	
+
 	nextState := stateOrder[currentIdx+1]
-	
+
 	// Check if next state is a HITL gate
 	if hitlGates[nextState] && !c.HITLApprovals[nextState] {
 		return fmt.Errorf("state %s requires HITL approval", nextState)
 	}
-	
+
 	c.State = nextState
 	c.UpdatedAt = time.Now()
 	c.NodeHistory = append(c.NodeHistory, nextState)
@@ -200,30 +292,31 @@ func (e *Engine) AdvanceState(caseID string) error {
 		Text:      fmt.Sprintf("Advanced to state: %s", nextState),
 		Timestamp: time.Now(),
 	})
-	
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	
+	e.saveStoreLocked()
+
 	return nil
 }
 
 func (e *Engine) ApproveHITL(caseID, state string, approved bool, reason string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	c, ok := e.cases[caseID]
 	if !ok {
 		return fmt.Errorf("case not found: %s", caseID)
 	}
-	
+
 	if !hitlGates[state] {
 		return fmt.Errorf("state %s is not a HITL gate", state)
 	}
-	
+
 	c.HITLApprovals[state] = approved
 	c.UpdatedAt = time.Now()
-	
+
 	action := "Approved"
 	if !approved {
 		action = "Rejected"
@@ -236,32 +329,34 @@ func (e *Engine) ApproveHITL(caseID, state string, approved bool, reason string)
 		Text:      fmt.Sprintf("Human review — %s: %s — %s", label, action, reason),
 		Timestamp: time.Now(),
 	})
-	
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	
+	e.saveStoreLocked()
+
 	return nil
 }
 
 func (e *Engine) AddNote(caseID, text string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	c, ok := e.cases[caseID]
 	if !ok {
 		return
 	}
-	
+
 	c.Notes = append(c.Notes, model.Note{
 		Text:      text,
 		Timestamp: time.Now(),
 	})
 	c.UpdatedAt = time.Now()
-	
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
+	e.saveStoreLocked()
 }
 
 // AttachDocument records an uploaded file on the case. Optional maps (first entry only) are merged into
@@ -281,18 +376,22 @@ func (e *Engine) AttachDocument(caseID, filename string, extras ...map[string]in
 	}
 
 	fn := rag.NormalizeLogicalName(filename)
+	exists := false
 	for _, f := range c.UploadedDocuments {
 		if rag.NormalizeLogicalName(f) == fn {
-			return
+			exists = true
+			break
 		}
 	}
 
-	c.UploadedDocuments = append(c.UploadedDocuments, fn)
+	if !exists {
+		c.UploadedDocuments = append(c.UploadedDocuments, fn)
+		c.Notes = append(c.Notes, model.Note{
+			Text:      fmt.Sprintf("Document uploaded: %s", fn),
+			Timestamp: time.Now(),
+		})
+	}
 	c.UpdatedAt = time.Now()
-	c.Notes = append(c.Notes, model.Note{
-		Text:      fmt.Sprintf("Document uploaded: %s", fn),
-		Timestamp: time.Now(),
-	})
 
 	// One row per uploaded file for clients/APIs that consume ai_file_summaries
 	foundIdx := -1
@@ -326,6 +425,7 @@ func (e *Engine) AttachDocument(caseID, filename string, extras ...map[string]in
 	if e.onChange != nil {
 		go e.onChange()
 	}
+	e.saveStoreLocked()
 }
 
 // DetachDocument removes a document from the case record.
@@ -339,7 +439,7 @@ func (e *Engine) DetachDocument(caseID, filename string) error {
 	}
 
 	fn := rag.NormalizeLogicalName(filename)
-	
+
 	// Remove from UploadedDocuments
 	var newDocs []string
 	for _, f := range c.UploadedDocuments {
@@ -368,6 +468,7 @@ func (e *Engine) DetachDocument(caseID, filename string) error {
 	if e.onChange != nil {
 		go e.onChange()
 	}
+	e.saveStoreLocked()
 	return nil
 }
 
@@ -385,6 +486,7 @@ func (e *Engine) SetAICaseSummary(caseID, summary string) error {
 	if e.onChange != nil {
 		go e.onChange()
 	}
+	e.saveStoreLocked()
 	return nil
 }
 
@@ -404,7 +506,7 @@ func (e *Engine) UpdateCase(caseID, clientName, matterType string) error {
 		c.MatterType = matterType
 	}
 	c.UpdatedAt = time.Now()
-	
+
 	c.Notes = append(c.Notes, model.Note{
 		Text:      fmt.Sprintf("Case info updated: %s (%s)", clientName, matterType),
 		Timestamp: time.Now(),
@@ -413,6 +515,7 @@ func (e *Engine) UpdateCase(caseID, clientName, matterType string) error {
 	if e.onChange != nil {
 		go e.onChange()
 	}
+	e.saveStoreLocked()
 	return nil
 }
 
@@ -427,20 +530,21 @@ func (e *Engine) DeleteCase(caseID string) error {
 	if e.onChange != nil {
 		go e.onChange()
 	}
+	e.saveStoreLocked()
 	return nil
 }
 
 func (e *Engine) evictOldest() {
 	var oldestID string
 	var oldestTime time.Time
-	
+
 	for id, c := range e.cases {
 		if oldestTime.IsZero() || c.UpdatedAt.Before(oldestTime) {
 			oldestID = id
 			oldestTime = c.UpdatedAt
 		}
 	}
-	
+
 	if oldestID != "" {
 		delete(e.cases, oldestID)
 	}
@@ -460,6 +564,7 @@ func (e *Engine) SetDraftPreview(caseID, content string) error {
 	if e.onChange != nil {
 		go e.onChange()
 	}
+	e.saveStoreLocked()
 	return nil
 }
 
@@ -477,5 +582,41 @@ func (e *Engine) SetDocumentDraft(caseID string, draft map[string]interface{}) e
 	if e.onChange != nil {
 		go e.onChange()
 	}
+	e.saveStoreLocked()
 	return nil
 }
+
+// AddDocumentToCase adds a document filename to an existing case
+func (e *Engine) AddDocumentToCase(caseID, filename string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	c, ok := e.cases[caseID]
+	if !ok {
+		return fmt.Errorf("case not found")
+	}
+
+	// Check if document already exists
+	for _, existing := range c.UploadedDocuments {
+		if existing == filename {
+			return nil // Already added, no error
+		}
+	}
+
+	c.UploadedDocuments = append(c.UploadedDocuments, filename)
+	c.UpdatedAt = time.Now()
+	c.Notes = append(c.Notes, model.Note{
+		Text:      fmt.Sprintf("Document added: %s", filename),
+		Timestamp: time.Now(),
+	})
+
+	if e.onChange != nil {
+		go e.onChange()
+	}
+	e.saveStoreLocked()
+	return nil
+}
+
+
+
+

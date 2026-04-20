@@ -7,7 +7,7 @@ import (
 )
 
 func TestFullLifecycleToArchive(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Full Client", "Civil Litigation", "Test", "Initial message")
 
 	if c.State != StateClientCapture {
@@ -47,7 +47,7 @@ func TestFullLifecycleToArchive(t *testing.T) {
 }
 
 func TestAdvancePastFinalState(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	for _, state := range []string{
@@ -74,7 +74,7 @@ func TestAdvancePastFinalState(t *testing.T) {
 }
 
 func TestAdvanceWithoutHITLApproval(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	e.AdvanceState(c.CaseID)
@@ -90,7 +90,7 @@ func TestAdvanceWithoutHITLApproval(t *testing.T) {
 }
 
 func TestAdvanceNonExistentCase(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	err := e.AdvanceState("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent case")
@@ -98,7 +98,7 @@ func TestAdvanceNonExistentCase(t *testing.T) {
 }
 
 func TestApproveHITLNonExistentCase(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	err := e.ApproveHITL("nonexistent", StateCaseEvaluation, true, "")
 	if err == nil {
 		t.Fatal("expected error for nonexistent case")
@@ -106,7 +106,7 @@ func TestApproveHITLNonExistentCase(t *testing.T) {
 }
 
 func TestApproveHITLNonHITLState(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	err := e.ApproveHITL(c.CaseID, StateInitialContact, true, "")
@@ -116,7 +116,7 @@ func TestApproveHITLNonHITLState(t *testing.T) {
 }
 
 func TestHITLRejectionThenApproval(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	e.AdvanceState(c.CaseID)
@@ -142,12 +142,12 @@ func TestHITLRejectionThenApproval(t *testing.T) {
 }
 
 func TestAddNoteNonExistentCase(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	e.AddNote("nonexistent", "some note")
 }
 
 func TestAttachDocumentDuplicate(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	e.AttachDocument(c.CaseID, "doc.txt")
@@ -160,7 +160,7 @@ func TestAttachDocumentDuplicate(t *testing.T) {
 }
 
 func TestAttachDocumentWithExtras(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	e.AttachDocument(c.CaseID, "doc.txt", map[string]interface{}{
@@ -179,7 +179,7 @@ func TestAttachDocumentWithExtras(t *testing.T) {
 }
 
 func TestDetachDocument(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	e.AttachDocument(c.CaseID, "doc1.txt")
@@ -200,7 +200,7 @@ func TestDetachDocument(t *testing.T) {
 }
 
 func TestDetachNonExistentDocument(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 	e.AttachDocument(c.CaseID, "doc1.txt")
 
@@ -216,7 +216,7 @@ func TestDetachNonExistentDocument(t *testing.T) {
 }
 
 func TestDetachNonExistentCase(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	err := e.DetachDocument("nonexistent", "doc.txt")
 	if err == nil {
 		t.Fatal("expected error for nonexistent case")
@@ -224,7 +224,7 @@ func TestDetachNonExistentCase(t *testing.T) {
 }
 
 func TestSetAICaseSummary(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	err := e.SetAICaseSummary(c.CaseID, "This is a comprehensive AI summary.")
@@ -239,7 +239,7 @@ func TestSetAICaseSummary(t *testing.T) {
 }
 
 func TestSetAICaseSummaryNonExistent(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	err := e.SetAICaseSummary("nonexistent", "summary")
 	if err == nil {
 		t.Fatal("expected error for nonexistent case")
@@ -247,7 +247,7 @@ func TestSetAICaseSummaryNonExistent(t *testing.T) {
 }
 
 func TestUpdateCase(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Old Name", "Old Type", "Source", "")
 
 	err := e.UpdateCase(c.CaseID, "New Name", "New Type")
@@ -265,7 +265,7 @@ func TestUpdateCase(t *testing.T) {
 }
 
 func TestUpdateCaseNonExistent(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	err := e.UpdateCase("nonexistent", "Name", "Type")
 	if err == nil {
 		t.Fatal("expected error for nonexistent case")
@@ -273,7 +273,7 @@ func TestUpdateCaseNonExistent(t *testing.T) {
 }
 
 func TestDeleteCase(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	err := e.DeleteCase(c.CaseID)
@@ -288,7 +288,7 @@ func TestDeleteCase(t *testing.T) {
 }
 
 func TestDeleteCaseNonExistent(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	err := e.DeleteCase("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent case")
@@ -296,7 +296,7 @@ func TestDeleteCaseNonExistent(t *testing.T) {
 }
 
 func TestNodeHistoryAccumulation(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	e.AdvanceState(c.CaseID)
@@ -309,7 +309,7 @@ func TestNodeHistoryAccumulation(t *testing.T) {
 }
 
 func TestCreateCaseGeneratesID(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	if c.CaseID == "" {
@@ -321,7 +321,7 @@ func TestCreateCaseGeneratesID(t *testing.T) {
 }
 
 func TestCreateCaseTimestamps(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 
 	if c.CreatedAt.IsZero() {
@@ -333,7 +333,7 @@ func TestCreateCaseTimestamps(t *testing.T) {
 }
 
 func TestDeepCopyCaseIsolation(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Client", "Type", "Source", "")
 	e.AttachDocument(c.CaseID, "doc.txt")
 
@@ -354,7 +354,7 @@ func TestDeepCopyCaseIsolation(t *testing.T) {
 }
 
 func TestListCasesOrder(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	e.CreateCase("A", "Type", "Source", "")
 	time.Sleep(time.Millisecond)
 	e.CreateCase("B", "Type", "Source", "")
@@ -368,7 +368,7 @@ func TestListCasesOrder(t *testing.T) {
 }
 
 func TestGetCaseSnapshotNonExistent(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	_, ok := e.GetCaseSnapshot("nonexistent")
 	if ok {
 		t.Error("expected false for nonexistent case")

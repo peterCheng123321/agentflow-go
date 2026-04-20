@@ -1,3 +1,6 @@
+# Build output (macOS .app)
+dist/
+
 # Binaries
 agentflow-go
 agentflow-go-new
@@ -10,12 +13,21 @@ agentflow-go-new
 # Data directory (uploaded files, secrets, vector store)
 data/
 
+# Dev cache if AGENTFLOW_DATA_DIR pointed inside the repo
+internal/**/data/
+
+# Coverage
+coverage.out
+
 # Logs
 server.log
 *.log
 
 # macOS
 .DS_Store
+
+# Python venv (optional dev deps from setup_mac.sh)
+.venv/
 
 # Python cache
 __pycache__/

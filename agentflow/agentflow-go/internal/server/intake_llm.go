@@ -130,6 +130,7 @@ func buildIntakePrompt(logicalName string) string {
 type batchAnalysisJSON struct {
 	ClientName string   `json:"client_name"`
 	MatterType string   `json:"matter_type"`
+	LLMError   string   `json:"-"` // set when batch LLM request fails (not from model JSON)
 	Plaintiffs []string `json:"plaintiffs"`
 	Defendants []string `json:"defendants"`
 	Files      []struct {
@@ -199,6 +200,7 @@ func (s *Server) analyzeBatchFromOCR(docs map[string]string) batchAnalysisJSON {
 	})
 	if err != nil {
 		log.Printf("[batch-analyze] LLM: %v", err)
+		out.LLMError = err.Error()
 		return out
 	}
 

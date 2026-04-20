@@ -8,7 +8,7 @@ import (
 )
 
 func TestWorkflowLifecycle(t *testing.T) {
-	e := NewEngine(10, nil)
+	e := NewEngine(10, "", nil)
 	c := e.CreateCase("Test Client", "Civil Litigation", "Test", "Msg")
 
 	if c.State != StateClientCapture {
@@ -56,7 +56,7 @@ func TestWorkflowLifecycle(t *testing.T) {
 }
 
 func TestDeadlockStress(t *testing.T) {
-	e := NewEngine(100, nil)
+	e := NewEngine(100, "", nil)
 	caseID := e.CreateCase("Stress Client", "Civil", "Stress", "").CaseID
 
 	const goroutines = 20
@@ -98,7 +98,7 @@ func TestDeadlockStress(t *testing.T) {
 }
 
 func TestEviction(t *testing.T) {
-	e := NewEngine(2, nil)
+	e := NewEngine(2, "", nil)
 	e.CreateCase("C1", "Type", "Source", "")
 	time.Sleep(time.Millisecond)
 	e.CreateCase("C2", "Type", "Source", "")

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -213,6 +214,10 @@ func (p *Provider) generateUncached(prompt, context string, config GenerationCon
 		"options": map[string]interface{}{
 			"num_predict": config.MaxTokens,
 			"temperature": config.Temp,
+			// Mirostat sampling for faster, more consistent responses
+			"mirostat":    2,
+			"mirostat_tau": 5.0,
+			"mirostat_eta": 0.1,
 		},
 	}
 
@@ -397,6 +402,59 @@ func (p *Provider) Unload() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.isReady = false
+}
+
+// GenerateWithTimeout generates text with a per-request timeout that respects context cancellation
+func (p *Provider) GenerateWithTimeout(ctx context.Context, prompt, contextStr string, config GenerationConfig, timeout time.Duration) (string, error) {
+	// Create a context with timeout for this generation
+	genCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Create a channel to receive the result
+	type result struct {
+		text string
+		err  error
+	}
+	resultCh := make(chan result, 1)
+
+	// Run the generation in a goroutine that respects cancellation
+	go func() {
+		// Check if context was cancelled before starting
+		select {
+		case <-genCtx.Done():
+			return
+		default:
+		}
+
+		// Generate with the cancellable context
+		text, err := p.generateWithContext(genCtx, prompt, contextStr, config)
+		select {
+		case resultCh <- result{text, err}:
+		case <-genCtx.Done():
+			// Context cancelled, don't send result
+		}
+	}()
+
+	// Wait for either result or timeout/context cancellation
+	select {
+	case <-genCtx.Done():
+		return "", fmt.Errorf("generation cancelled: %w", genCtx.Err())
+	case res := <-resultCh:
+		return res.text, res.err
+	}
+}
+
+// generateWithContext is an internal method that respects context cancellation
+func (p *Provider) generateWithContext(ctx context.Context, prompt, contextStr string, config GenerationConfig) (string, error) {
+	// For now, delegate to Generate. In a full implementation, we would
+	// pass the context through the entire call chain.
+	// TODO: Make generateUncached context-aware
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+		return p.Generate(prompt, contextStr, config)
+	}
 }
 
 func (p *Provider) Stats() map[string]interface{} {

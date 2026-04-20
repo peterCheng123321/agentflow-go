@@ -28,6 +28,7 @@ type BatchMeta struct {
 	ClientName string
 	MatterType string
 	Files      []FileMeta
+	LLMError   string // set when batch LLM request fails (not from model JSON)
 }
 
 // FileMeta represents metadata for a single file in a batch analysis.
@@ -227,7 +228,11 @@ func (p *BatchProcessor) ProcessBatch(ctx context.Context, jobID string, filePat
 			return nil
 		})
 	}
-	_ = g.Wait() // per-file classify errors are recorded on fileState
+	if err := g.Wait(); err != nil && err != context.Canceled {
+		log.Printf("[Processor] Classification wait error: %v", err)
+		// Individual errors are recorded on fileState, but we also log group errors
+		return nil, err
+	}
 	for _, s := range states {
 		if s.ocrErr != nil {
 			continue

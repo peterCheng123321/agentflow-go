@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -89,7 +90,7 @@ func New(cfg *config.Config) *Server {
 	if maxCases < 1 {
 		maxCases = 200
 	}
-	s.workflow = workflow.NewEngine(maxCases, func() {
+	s.workflow = workflow.NewEngine(maxCases, cfg.DataDir, func() {
 		go s.broadcastStatus()
 	})
 
@@ -147,14 +148,18 @@ func (s *Server) Shutdown() {
 func (s *Server) wsWriteJSON(conn *websocket.Conn, v interface{}) error {
 	s.wsWriteMu.Lock()
 	defer s.wsWriteMu.Unlock()
-	_ = conn.SetWriteDeadline(time.Now().Add(25 * time.Second))
+	if err := conn.SetWriteDeadline(time.Now().Add(25 * time.Second)); err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
 	return conn.WriteJSON(v)
 }
 
 func (s *Server) wsWriteMessage(conn *websocket.Conn, messageType int, data []byte) error {
 	s.wsWriteMu.Lock()
 	defer s.wsWriteMu.Unlock()
-	_ = conn.SetWriteDeadline(time.Now().Add(25 * time.Second))
+	if err := conn.SetWriteDeadline(time.Now().Add(25 * time.Second)); err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
 	return conn.WriteMessage(messageType, data)
 }
 
@@ -171,6 +176,8 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/v1/rag/summary", s.handleRAGSummary)
 	s.mux.HandleFunc("/v1/documents", s.handleListDocuments)
 	s.mux.HandleFunc("/v1/device", s.handleDeviceStatus)
+	s.mux.HandleFunc("/api/models", s.handleListModels)
+	s.mux.HandleFunc("/api/models/benchmark", s.handleBenchmarkModel)
 
 	// Prefix handlers LAST
 	s.mux.HandleFunc("/v1/jobs/", s.handleJobs)
@@ -211,7 +218,7 @@ func (s *Server) submitJob(jobType string, fn func(job *model.Job) (any, error))
 	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
 	job := &model.Job{
 		ID:        jobID,
-		Type:      jobType,
+		Type:      model.JobType(jobType),
 		Status:    model.JobStatusPending,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -304,12 +311,21 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		log.Printf("[WebSocket] Upgrade failed: %v", err)
 		return
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+	if err := conn.SetReadDeadline(time.Now().Add(120 * time.Second)); err != nil {
+		log.Printf("[WebSocket] SetReadDeadline failed: %v", err)
+		_ = conn.Close()
+		return
+	}
 	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		if err := conn.SetReadDeadline(time.Now().Add(120 * time.Second)); err != nil {
+			log.Printf("[WebSocket] Pong handler SetReadDeadline failed: %v", err)
+			return err
+		}
+		return nil
 	})
 
 	s.clientsMu.Lock()
@@ -1176,6 +1192,34 @@ func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, summary)
 }
 
+// wsLoopbackEquivalent reports whether originHost and requestHost refer to the same
+// loopback endpoint (e.g. localhost:8000 vs 127.0.0.1:8000). Browsers send Origin
+// based on the URL bar; Host can differ, which would otherwise fail WebSocket upgrades.
+func wsLoopbackEquivalent(originHost, requestHost string) bool {
+	oh, op, errO := net.SplitHostPort(originHost)
+	if errO != nil {
+		oh, op = originHost, ""
+	}
+	rh, rp, errR := net.SplitHostPort(requestHost)
+	if errR != nil {
+		rh, rp = requestHost, ""
+	}
+	if op != "" && rp != "" && op != rp {
+		return false
+	}
+	normalize := func(host string) string {
+		h := strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+		if strings.EqualFold(h, "localhost") {
+			return "127.0.0.1"
+		}
+		if ip := net.ParseIP(h); ip != nil && ip.IsLoopback() {
+			return "127.0.0.1"
+		}
+		return strings.ToLower(h)
+	}
+	return normalize(oh) == normalize(rh)
+}
+
 func unescapeURLPathSegment(seg string) string {
 	out := seg
 	for i := 0; i < 3; i++ {
@@ -1487,4 +1531,81 @@ func extractMatterType(filename string) string {
 	}
 
 	return "Civil Litigation"
+}
+
+func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+
+	backend := llm.BackendOllama
+	if s.cfg.LLMBackend == "dashscope" {
+		backend = llm.BackendOpenAICompat
+	}
+
+	baseURL := s.cfg.OllamaURL
+	if backend == llm.BackendOpenAICompat {
+		baseURL = s.cfg.DashScopeBaseURL
+	}
+
+	models, err := llm.ListModels(backend, baseURL)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list models: %v", err))
+		return
+	}
+
+	for i := range models {
+		if models[i].ID == s.cfg.ModelName {
+			models[i].IsDefault = true
+		}
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"models":  models,
+		"backend": s.cfg.LLMBackend,
+		"current": s.cfg.ModelName,
+	})
+}
+
+func (s *Server) handleBenchmarkModel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+
+	var req struct {
+		ModelID  string  `json:"model_id"`
+		Prompt   string  `json:"prompt,omitempty"`
+		Context  string  `json:"context,omitempty"`
+		MaxTok   int     `json:"max_tokens,omitempty"`
+		Temp     float64 `json:"temperature,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	modelID := req.ModelID
+	if modelID == "" {
+		modelID = s.cfg.ModelName
+	}
+
+	var result llm.BenchmarkResult
+	if req.Prompt != "" {
+		maxTok := req.MaxTok
+		if maxTok <= 0 {
+			maxTok = 500
+		}
+		temp := req.Temp
+		if temp <= 0 {
+			temp = 0.1
+		}
+		result = s.llm.BenchmarkWithPrompt(modelID, req.Prompt, req.Context, maxTok, temp)
+	} else {
+		result = s.llm.Benchmark(modelID)
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
 }
