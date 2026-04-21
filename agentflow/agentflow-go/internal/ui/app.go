@@ -23,11 +23,13 @@ func Run(a *core.App) {
 	w.SetMaster()
 
 	cv := newCasesView(a, w)
+	av := newAgentView(a, w)
 	jv := newJobsView(a)
 	sv := newSettingsView(a)
 
 	tabs := container.NewAppTabs(
 		container.NewTabItemWithIcon("Cases", theme.FolderOpenIcon(), cv.content()),
+		container.NewTabItemWithIcon("Agent", theme.SearchIcon(), av.content()),
 		container.NewTabItemWithIcon("Jobs", theme.MediaPlayIcon(), jv.content()),
 		container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), sv.content()),
 	)

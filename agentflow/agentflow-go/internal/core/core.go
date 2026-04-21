@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"agentflow-go/internal/agent"
 	"agentflow-go/internal/config"
 	"agentflow-go/internal/llm"
 	"agentflow-go/internal/llmutil"
@@ -16,6 +17,7 @@ import (
 	"agentflow-go/internal/ocr"
 	"agentflow-go/internal/processor"
 	"agentflow-go/internal/rag"
+	"agentflow-go/internal/tools"
 	"agentflow-go/internal/worker"
 	"agentflow-go/internal/workflow"
 
@@ -28,6 +30,7 @@ type App struct {
 	Cfg      *config.Config
 	LLM      *llm.Provider
 	OCR      *ocr.Engine
+	Agent    *agent.Executor // pre-wired agent executor with all built-in tools
 	RAG      *rag.Manager
 	Workflow *workflow.Engine
 	Proc     *processor.BatchProcessor
@@ -98,7 +101,33 @@ func New(cfg *config.Config) *App {
 	})
 	a.workerPool = wp
 
+	// Build the agent tool registry and executor
+	reg := agent.NewRegistry()
+	reg.Register(tools.NewRAGSearch(a.RAG))
+	reg.Register(tools.NewEntityExtraction(a.LLM, cfg.ModelMedium))
+	reg.Register(tools.NewDeadlineCalc())
+	reg.Register(tools.NewCaseSummary(a.RAG, a.LLM, cfg.ModelComplex))
+	reg.Register(tools.NewClassifyDoc(a.LLM))
+	a.Agent = agent.NewExecutor(reg, a.LLM, agent.Config{
+		MaxSteps:         10,
+		Model:            cfg.ModelComplex,
+		MaxTokensPerStep: 1024,
+	})
+
 	return a
+}
+
+// AgentRun submits an agent task as a background job and returns the job ID.
+// The job result will contain the agent.RunResult when complete.
+func (a *App) AgentRun(goal string, caseID string) string {
+	return a.SubmitJob("agent", func(j *model.Job) (any, error) {
+		result := a.Agent.Run(context.Background(), goal)
+		// Persist final answer as an AI case summary if a case ID was provided
+		if caseID != "" && result.Answer != "" {
+			_ = a.Workflow.SetAICaseSummary(caseID, result.Answer)
+		}
+		return result, nil
+	})
 }
 
 // Subscribe registers a callback that fires whenever any state changes.
