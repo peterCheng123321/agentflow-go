@@ -1,4 +1,4 @@
-package server
+package worker
 
 import (
 	"container/heap"
@@ -20,17 +20,9 @@ type poolJob struct {
 
 type priorityQueue []*poolJob
 
-func (pq priorityQueue) Len() int { return len(pq) }
-
-func (pq priorityQueue) Less(i, j int) bool {
-	return pq[i].priority > pq[j].priority
-}
-
-func (pq priorityQueue) Swap(i, j int) {
-	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].index = i
-	pq[j].index = j
-}
+func (pq priorityQueue) Len() int            { return len(pq) }
+func (pq priorityQueue) Less(i, j int) bool  { return pq[i].priority > pq[j].priority }
+func (pq priorityQueue) Swap(i, j int)       { pq[i], pq[j] = pq[j], pq[i]; pq[i].index = i; pq[j].index = j }
 
 func (pq *priorityQueue) Push(x any) {
 	n := len(*pq)
@@ -49,7 +41,7 @@ func (pq *priorityQueue) Pop() any {
 	return item
 }
 
-type WorkerPool struct {
+type Pool struct {
 	numWorkers int
 	queue      priorityQueue
 	mu         sync.Mutex
@@ -60,9 +52,7 @@ type WorkerPool struct {
 	failedJobs    atomic.Int64
 	enqueuedJobs  atomic.Int64
 
-	// Optional: when set (e.g. by Server), job mutations go through this path so jobsMu stays consistent.
-	updateJobFn func(id string, fn func(*model.Job))
-	// Optional: called once after a job reaches a terminal state (success, failure, or panic recovery).
+	updateJobFn   func(id string, fn func(*model.Job))
 	afterTerminal func(*model.Job)
 
 	ctx    context.Context
@@ -70,37 +60,26 @@ type WorkerPool struct {
 	wg     sync.WaitGroup
 }
 
-type ContextCancelFunc = context.CancelFunc
-
-func NewWorkerPool(numWorkers int) *WorkerPool {
+func New(numWorkers int) *Pool {
 	ctx, cancel := context.WithCancel(context.Background())
-	wp := &WorkerPool{
+	wp := &Pool{
 		numWorkers: numWorkers,
 		queue:      make(priorityQueue, 0),
 		ctx:        ctx,
 		cancel:     cancel,
 	}
 	wp.notEmpty = *sync.NewCond(&wp.mu)
-
 	for i := 0; i < numWorkers; i++ {
 		wp.wg.Add(1)
 		go wp.worker(i)
 	}
-
 	return wp
 }
 
-// SetJobUpdater routes status/result updates through fn (e.g. Server.updateJob). If nil, workers mutate jobs directly (tests).
-func (wp *WorkerPool) SetJobUpdater(fn func(id string, upd func(*model.Job))) {
-	wp.updateJobFn = fn
-}
+func (wp *Pool) SetJobUpdater(fn func(id string, upd func(*model.Job))) { wp.updateJobFn = fn }
+func (wp *Pool) SetAfterTerminal(fn func(*model.Job))                   { wp.afterTerminal = fn }
 
-// SetAfterTerminal runs after each job finishes (including panics). Used for broadcast and delayed job cleanup.
-func (wp *WorkerPool) SetAfterTerminal(fn func(*model.Job)) {
-	wp.afterTerminal = fn
-}
-
-func (wp *WorkerPool) applyJobUpdate(pj *poolJob, upd func(*model.Job)) {
+func (wp *Pool) applyJobUpdate(pj *poolJob, upd func(*model.Job)) {
 	if wp.updateJobFn != nil {
 		wp.updateJobFn(pj.job.ID, upd)
 	} else {
@@ -108,13 +87,13 @@ func (wp *WorkerPool) applyJobUpdate(pj *poolJob, upd func(*model.Job)) {
 	}
 }
 
-func (wp *WorkerPool) finishTerminal(pj *poolJob) {
+func (wp *Pool) finishTerminal(pj *poolJob) {
 	if wp.afterTerminal != nil {
 		wp.afterTerminal(pj.job)
 	}
 }
 
-func (wp *WorkerPool) worker(id int) {
+func (wp *Pool) worker(id int) {
 	defer wp.wg.Done()
 	for {
 		wp.mu.Lock()
@@ -133,12 +112,11 @@ func (wp *WorkerPool) worker(id int) {
 		wp.activeWorkers.Add(1)
 		func() {
 			defer wp.activeWorkers.Add(-1)
-
 			var panicked bool
 			defer func() {
 				if r := recover(); r != nil {
 					panicked = true
-					log.Printf("[WorkerPool] worker %d job %s panic: %v", id, pj.job.ID, r)
+					log.Printf("[Pool] worker %d job %s panic: %v", id, pj.job.ID, r)
 					wp.applyJobUpdate(pj, func(j *model.Job) {
 						j.Status = model.JobStatusFailed
 						j.Error = "internal error: panic during execution"
@@ -158,7 +136,6 @@ func (wp *WorkerPool) worker(id int) {
 			if panicked {
 				return
 			}
-
 			if err != nil {
 				wp.applyJobUpdate(pj, func(j *model.Job) {
 					j.Status = model.JobStatusFailed
@@ -180,13 +157,8 @@ func (wp *WorkerPool) worker(id int) {
 	}
 }
 
-func (wp *WorkerPool) Enqueue(ctx context.Context, job *model.Job, priority int, fn func(job *model.Job) (any, error)) error {
-	pj := &poolJob{
-		job:      job,
-		fn:       fn,
-		priority: priority,
-	}
-
+func (wp *Pool) Enqueue(ctx context.Context, job *model.Job, priority int, fn func(*model.Job) (any, error)) error {
+	pj := &poolJob{job: job, fn: fn, priority: priority}
 	wp.mu.Lock()
 	select {
 	case <-wp.ctx.Done():
@@ -197,31 +169,28 @@ func (wp *WorkerPool) Enqueue(ctx context.Context, job *model.Job, priority int,
 		return ctx.Err()
 	default:
 	}
-
 	heap.Push(&wp.queue, pj)
 	wp.enqueuedJobs.Add(1)
 	wp.mu.Unlock()
-
 	wp.notEmpty.Signal()
 	return nil
 }
 
-func (wp *WorkerPool) Stats() map[string]interface{} {
+func (wp *Pool) Stats() map[string]interface{} {
 	wp.mu.Lock()
-	queueLen := wp.queue.Len()
+	qlen := wp.queue.Len()
 	wp.mu.Unlock()
-
 	return map[string]interface{}{
 		"num_workers":    wp.numWorkers,
 		"active_workers": wp.activeWorkers.Load(),
-		"queue_length":   queueLen,
+		"queue_length":   qlen,
 		"enqueued":       wp.enqueuedJobs.Load(),
 		"completed":      wp.completedJobs.Load(),
 		"failed":         wp.failedJobs.Load(),
 	}
 }
 
-func (wp *WorkerPool) Shutdown() {
+func (wp *Pool) Shutdown() {
 	wp.cancel()
 	wp.notEmpty.Broadcast()
 	wp.wg.Wait()

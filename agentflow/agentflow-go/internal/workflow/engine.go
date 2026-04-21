@@ -1,8 +1,10 @@
 package workflow
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,19 +13,21 @@ import (
 
 	"agentflow-go/internal/model"
 	"agentflow-go/internal/rag"
+
+	_ "modernc.org/sqlite"
 )
 
 const (
-	StateClientCapture     = "CLIENT_CAPTURE"
-	StateInitialContact    = "INITIAL_CONTACT"
-	StateCaseEvaluation    = "CASE_EVALUATION"
-	StateFeeCollection     = "FEE_COLLECTION"
-	StateGroupCreation     = "GROUP_CREATION"
-	StateMaterialIngestion = "MATERIAL_INGESTION"
+	StateClientCapture      = "CLIENT_CAPTURE"
+	StateInitialContact     = "INITIAL_CONTACT"
+	StateCaseEvaluation     = "CASE_EVALUATION"
+	StateFeeCollection      = "FEE_COLLECTION"
+	StateGroupCreation      = "GROUP_CREATION"
+	StateMaterialIngestion  = "MATERIAL_INGESTION"
 	StateDocumentGeneration = "DOCUMENT_GENERATION"
-	StateClientApproval    = "CLIENT_APPROVAL"
-	StateFinalPDFSend      = "FINAL_PDF_SEND"
-	StateArchiveClose      = "ARCHIVE_CLOSE"
+	StateClientApproval     = "CLIENT_APPROVAL"
+	StateFinalPDFSend       = "FINAL_PDF_SEND"
+	StateArchiveClose       = "ARCHIVE_CLOSE"
 )
 
 var stateOrder = []string{
@@ -51,17 +55,13 @@ var hitlGateLabels = map[string]string{
 	StateFinalPDFSend:       "Final PDF delivery",
 }
 
-// persistedStore holds the serializable case data for persistence
-type persistedStore struct {
-	Cases map[string]*model.Case `json:"cases"`
-}
-
 type Engine struct {
 	mu         sync.RWMutex
 	cases      map[string]*model.Case
 	maxCases   int
 	persistDir string
 	onChange   func()
+	db         *sql.DB
 }
 
 func NewEngine(maxCases int, persistDir string, onChange func()) *Engine {
@@ -71,86 +71,107 @@ func NewEngine(maxCases int, persistDir string, onChange func()) *Engine {
 		persistDir: persistDir,
 		onChange:   onChange,
 	}
+	e.openDB()
 	e.loadStore()
 	return e
 }
 
-// loadStore restores cases from disk on startup
+func (e *Engine) openDB() {
+	if e.persistDir == "" {
+		return
+	}
+	os.MkdirAll(e.persistDir, 0755)
+	dbPath := filepath.Join(e.persistDir, "cases.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		log.Printf("workflow: failed to open SQLite DB: %v", err)
+		return
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS cases (id TEXT PRIMARY KEY, data TEXT NOT NULL)`); err != nil {
+		log.Printf("workflow: failed to create cases table: %v", err)
+		_ = db.Close()
+		return
+	}
+	e.db = db
+}
+
+func (e *Engine) Close() {
+	if e.db != nil {
+		_ = e.db.Close()
+		e.db = nil
+	}
+}
+
 func (e *Engine) loadStore() {
+	if e.db != nil {
+		e.loadFromSQLite()
+		return
+	}
+	e.loadFromJSON()
+}
+
+func (e *Engine) loadFromSQLite() {
+	rows, err := e.db.Query(`SELECT id, data FROM cases`)
+	if err != nil {
+		log.Printf("workflow: loadFromSQLite: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, data string
+		if err := rows.Scan(&id, &data); err != nil {
+			continue
+		}
+		var c model.Case
+		if err := json.Unmarshal([]byte(data), &c); err != nil {
+			log.Printf("workflow: corrupt case %s: %v", id, err)
+			continue
+		}
+		e.cases[id] = &c
+	}
+}
+
+func (e *Engine) loadFromJSON() {
 	if e.persistDir == "" {
 		return
 	}
 	storePath := filepath.Join(e.persistDir, "cases.json")
 	data, err := os.ReadFile(storePath)
 	if err != nil {
-		// No existing store file - start fresh
 		return
 	}
-
-	var ps persistedStore
+	var ps struct {
+		Cases map[string]*model.Case `json:"cases"`
+	}
 	if err := json.Unmarshal(data, &ps); err != nil {
-		// Corrupted data - log and start fresh
 		return
 	}
-
 	if ps.Cases != nil {
 		e.cases = ps.Cases
 	}
 }
 
-// saveStore persists the current cases map to disk
-// Must be called while holding the write lock (e.mu.Lock())
-func (e *Engine) saveStoreLocked() {
-	if e.persistDir == "" {
+// persistCaseLocked writes a single case to SQLite. Must be called while holding e.mu write lock.
+func (e *Engine) persistCaseLocked(c *model.Case) {
+	if e.db == nil {
 		return
 	}
-	os.MkdirAll(e.persistDir, 0755)
-	storePath := filepath.Join(e.persistDir, "cases.json")
-
-	ps := persistedStore{
-		Cases: e.cases,
-	}
-
-	data, err := json.Marshal(ps)
+	data, err := json.Marshal(c)
 	if err != nil {
 		return
 	}
-
-	tmpPath := storePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return
-	}
-	if err := os.Rename(tmpPath, storePath); err != nil {
-		os.Remove(tmpPath)
+	if _, err := e.db.Exec(`INSERT OR REPLACE INTO cases (id, data) VALUES (?, ?)`, c.CaseID, string(data)); err != nil {
+		log.Printf("workflow: persistCase %s: %v", c.CaseID, err)
 	}
 }
 
-// saveStore acquires a read lock and persists the current cases map to disk
-func (e *Engine) saveStore() {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	if e.persistDir == "" {
+// removeCaseLocked deletes a case from SQLite. Must be called while holding e.mu write lock.
+func (e *Engine) removeCaseLocked(id string) {
+	if e.db == nil {
 		return
 	}
-	os.MkdirAll(e.persistDir, 0755)
-	storePath := filepath.Join(e.persistDir, "cases.json")
-
-	ps := persistedStore{
-		Cases: e.cases,
-	}
-
-	data, err := json.Marshal(ps)
-	if err != nil {
-		return
-	}
-
-	tmpPath := storePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return
-	}
-	if err := os.Rename(tmpPath, storePath); err != nil {
-		os.Remove(tmpPath)
+	if _, err := e.db.Exec(`DELETE FROM cases WHERE id = ?`, id); err != nil {
+		log.Printf("workflow: removeCase %s: %v", id, err)
 	}
 }
 
@@ -187,7 +208,6 @@ func deepCopyCase(c *model.Case) model.Case {
 func (e *Engine) CreateCase(clientName, matterType, sourceChannel, initialMsg string) model.Case {
 	e.mu.Lock()
 
-	// Evict old cases if at capacity
 	if len(e.cases) >= e.maxCases {
 		e.evictOldest()
 	}
@@ -218,19 +238,17 @@ func (e *Engine) CreateCase(clientName, matterType, sourceChannel, initialMsg st
 		})
 	}
 
+	e.persistCaseLocked(c)
 	snapshot := deepCopyCase(c)
 	e.mu.Unlock()
 
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStore()
 
 	return snapshot
 }
 
-// GetCaseSnapshot returns an independent copy safe to use after the lock is released
-// (e.g. for JSON encoding without racing mutating goroutines).
 func (e *Engine) GetCaseSnapshot(caseID string) (model.Case, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -280,7 +298,6 @@ func (e *Engine) AdvanceState(caseID string) error {
 
 	nextState := stateOrder[currentIdx+1]
 
-	// Check if next state is a HITL gate
 	if hitlGates[nextState] && !c.HITLApprovals[nextState] {
 		return fmt.Errorf("state %s requires HITL approval", nextState)
 	}
@@ -293,10 +310,11 @@ func (e *Engine) AdvanceState(caseID string) error {
 		Timestamp: time.Now(),
 	})
 
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
 
 	return nil
 }
@@ -330,10 +348,11 @@ func (e *Engine) ApproveHITL(caseID, state string, approved bool, reason string)
 		Timestamp: time.Now(),
 	})
 
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
 
 	return nil
 }
@@ -353,10 +372,11 @@ func (e *Engine) AddNote(caseID, text string) {
 	})
 	c.UpdatedAt = time.Now()
 
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
 }
 
 // AttachDocument records an uploaded file on the case. Optional maps (first entry only) are merged into
@@ -393,7 +413,6 @@ func (e *Engine) AttachDocument(caseID, filename string, extras ...map[string]in
 	}
 	c.UpdatedAt = time.Now()
 
-	// One row per uploaded file for clients/APIs that consume ai_file_summaries
 	foundIdx := -1
 	for i := range c.AIFileSummaries {
 		if c.AIFileSummaries[i] == nil {
@@ -422,13 +441,13 @@ func (e *Engine) AttachDocument(caseID, filename string, extras ...map[string]in
 		c.AIFileSummaries = append(c.AIFileSummaries, row)
 	}
 
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
 }
 
-// DetachDocument removes a document from the case record.
 func (e *Engine) DetachDocument(caseID, filename string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -440,7 +459,6 @@ func (e *Engine) DetachDocument(caseID, filename string) error {
 
 	fn := rag.NormalizeLogicalName(filename)
 
-	// Remove from UploadedDocuments
 	var newDocs []string
 	for _, f := range c.UploadedDocuments {
 		if rag.NormalizeLogicalName(f) != fn {
@@ -449,11 +467,10 @@ func (e *Engine) DetachDocument(caseID, filename string) error {
 	}
 	c.UploadedDocuments = newDocs
 
-	// Remove from AIFileSummaries
 	var newSums []map[string]interface{}
 	for _, s := range c.AIFileSummaries {
 		if sfn, ok := s["filename"].(string); ok && rag.NormalizeLogicalName(sfn) == fn {
-			continue // skip
+			continue
 		}
 		newSums = append(newSums, s)
 	}
@@ -465,14 +482,15 @@ func (e *Engine) DetachDocument(caseID, filename string) error {
 		Timestamp: time.Now(),
 	})
 
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
+
 	return nil
 }
 
-// SetAICaseSummary persists the latest generated case summary on the case record.
 func (e *Engine) SetAICaseSummary(caseID, summary string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -483,10 +501,13 @@ func (e *Engine) SetAICaseSummary(caseID, summary string) error {
 	}
 	c.AICaseSummary = summary
 	c.UpdatedAt = time.Now()
+
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
+
 	return nil
 }
 
@@ -512,10 +533,12 @@ func (e *Engine) UpdateCase(caseID, clientName, matterType string) error {
 		Timestamp: time.Now(),
 	})
 
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
+
 	return nil
 }
 
@@ -526,11 +549,12 @@ func (e *Engine) DeleteCase(caseID string) error {
 		return fmt.Errorf("case not found")
 	}
 	delete(e.cases, caseID)
+	e.removeCaseLocked(caseID)
 
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
+
 	return nil
 }
 
@@ -547,10 +571,10 @@ func (e *Engine) evictOldest() {
 
 	if oldestID != "" {
 		delete(e.cases, oldestID)
+		e.removeCaseLocked(oldestID)
 	}
 }
 
-// SetDraftPreview stores the rendered draft text (markdown/plain) for a case.
 func (e *Engine) SetDraftPreview(caseID, content string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -561,14 +585,16 @@ func (e *Engine) SetDraftPreview(caseID, content string) error {
 	}
 	c.DraftPreview = content
 	c.UpdatedAt = time.Now()
+
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
+
 	return nil
 }
 
-// SetDocumentDraft stores the structured draft (sections + highlights with evidence links).
 func (e *Engine) SetDocumentDraft(caseID string, draft map[string]interface{}) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -579,14 +605,16 @@ func (e *Engine) SetDocumentDraft(caseID string, draft map[string]interface{}) e
 	}
 	c.DocumentDraft = draft
 	c.UpdatedAt = time.Now()
+
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
+
 	return nil
 }
 
-// AddDocumentToCase adds a document filename to an existing case
 func (e *Engine) AddDocumentToCase(caseID, filename string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -596,10 +624,9 @@ func (e *Engine) AddDocumentToCase(caseID, filename string) error {
 		return fmt.Errorf("case not found")
 	}
 
-	// Check if document already exists
 	for _, existing := range c.UploadedDocuments {
 		if existing == filename {
-			return nil // Already added, no error
+			return nil
 		}
 	}
 
@@ -610,13 +637,11 @@ func (e *Engine) AddDocumentToCase(caseID, filename string) error {
 		Timestamp: time.Now(),
 	})
 
+	e.persistCaseLocked(c)
+
 	if e.onChange != nil {
 		go e.onChange()
 	}
-	e.saveStoreLocked()
+
 	return nil
 }
-
-
-
-

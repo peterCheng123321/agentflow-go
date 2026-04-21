@@ -1,4 +1,4 @@
-package server
+package worker
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 )
 
 func TestWorkerPoolBasicExecution(t *testing.T) {
-	wp := NewWorkerPool(2)
+	wp := New(2)
 	defer wp.Shutdown()
 
 	var mu sync.Mutex
@@ -44,7 +44,7 @@ func TestWorkerPoolBasicExecution(t *testing.T) {
 }
 
 func TestWorkerPoolPriorityOrder(t *testing.T) {
-	wp := NewWorkerPool(1)
+	wp := New(1)
 	defer wp.Shutdown()
 
 	var order []int
@@ -96,7 +96,7 @@ func TestWorkerPoolPriorityOrder(t *testing.T) {
 }
 
 func TestWorkerPoolContextCancellation(t *testing.T) {
-	wp := NewWorkerPool(1)
+	wp := New(1)
 	defer wp.Shutdown()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -122,7 +122,7 @@ func TestWorkerPoolContextCancellation(t *testing.T) {
 }
 
 func TestWorkerPoolCancelledContext(t *testing.T) {
-	wp := NewWorkerPool(1)
+	wp := New(1)
 	defer wp.Shutdown()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -138,7 +138,7 @@ func TestWorkerPoolCancelledContext(t *testing.T) {
 }
 
 func TestWorkerPoolShutdown(t *testing.T) {
-	wp := NewWorkerPool(2)
+	wp := New(2)
 
 	var completed int
 	var mu sync.Mutex
@@ -167,7 +167,7 @@ func TestWorkerPoolShutdown(t *testing.T) {
 }
 
 func TestWorkerPoolStats(t *testing.T) {
-	wp := NewWorkerPool(3)
+	wp := New(3)
 	defer wp.Shutdown()
 
 	for i := 0; i < 5; i++ {
@@ -197,7 +197,7 @@ func TestWorkerPoolStats(t *testing.T) {
 }
 
 func TestWorkerPoolPanicRecovery(t *testing.T) {
-	wp := NewWorkerPool(1)
+	wp := New(1)
 	defer wp.Shutdown()
 
 	job := &model.Job{ID: "job-panic"}
@@ -235,7 +235,7 @@ func TestWorkerPoolPanicRecovery(t *testing.T) {
 }
 
 func TestWorkerPoolConcurrencyLimit(t *testing.T) {
-	wp := NewWorkerPool(2)
+	wp := New(2)
 	defer wp.Shutdown()
 
 	var maxConcurrent int

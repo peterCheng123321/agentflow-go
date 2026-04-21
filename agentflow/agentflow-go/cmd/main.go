@@ -1,75 +1,53 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"log"
-	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"runtime"
 	"syscall"
-	"time"
 
-	"agentflow-go/internal/server"
 	"agentflow-go/internal/config"
+	"agentflow-go/internal/core"
+	"agentflow-go/internal/ui"
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("AgentFlow Go starting...")
+	// Fyne requires the main goroutine on macOS
+	runtime.LockOSThread()
 
-	// Maximize CPU utilization for Apple Silicon (M1/M2/M3) and batch processing
-	// This allows Go to use all available cores for concurrent LLM/OCR operations
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Println("AgentFlow starting…")
+
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	// Load configuration
 	cfg := config.Load()
-	log.Printf("Config: llm_backend=%s model=%s (set AGENTFLOW_LLM_BACKEND / AGENTFLOW_MODEL to override)", cfg.LLMBackend, cfg.ModelName)
+	log.Printf("Config: llm_backend=%s model=%s", cfg.LLMBackend, cfg.ModelName)
 
-	// Create server
-	srv := server.New(cfg)
+	a := core.New(cfg)
 
-	// Graceful shutdown
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// Start server in goroutine
-	serverReady := make(chan struct{})
-	go func() {
-		addr := fmt.Sprintf(":%d", cfg.Port)
-		log.Printf("HTTP server listening on %s", addr)
-		close(serverReady)
-		if err := http.ListenAndServe(addr, srv.Router()); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed: %v", err)
-		}
-	}()
-
-	// Wait for server to be ready then open browser
-	<-serverReady
-	if os.Getenv("AGENTFLOW_NO_BROWSER") == "" {
-		go func() {
-			// Small delay to ensure server is fully ready
-			time.Sleep(500 * time.Millisecond)
-			url := fmt.Sprintf("http://localhost:%d", cfg.Port)
-			log.Printf("Opening browser to %s", url)
-			_ = exec.Command("open", url).Run()
-		}()
+	// Headless mode for testing / CI
+	if os.Getenv("AGENTFLOW_NO_UI") != "" {
+		log.Println("Headless mode — waiting for signal")
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		<-ch
+		a.Shutdown()
+		return
 	}
 
-	// Wait for shutdown signal
-	<-ctx.Done()
-	log.Println("Shutting down...")
+	// Graceful shutdown on OS signal (handled inside ShowAndRun via window close)
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		<-c
+		log.Println("Shutting down…")
+		a.Shutdown()
+		os.Exit(0)
+	}()
 
-	// Cleanup
-	srv.Shutdown()
+	ui.Run(a) // blocks until window closed
 
-	// Give 5 seconds for graceful shutdown
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	
-	_ = shutdownCtx // Use the context
-	
-	log.Println("AgentFlow Go stopped")
+	log.Println("AgentFlow stopped")
+	a.Shutdown()
 }

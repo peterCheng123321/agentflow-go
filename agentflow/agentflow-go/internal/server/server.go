@@ -1,21 +1,16 @@
 package server
 
 import (
-	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"agentflow-go/internal/config"
 	"agentflow-go/internal/llm"
@@ -23,6 +18,7 @@ import (
 	"agentflow-go/internal/ocr"
 	"agentflow-go/internal/processor"
 	"agentflow-go/internal/rag"
+	"agentflow-go/internal/worker"
 	"agentflow-go/internal/workflow"
 
 	"github.com/gorilla/websocket"
@@ -40,8 +36,8 @@ type Server struct {
 	clientsMu  sync.Mutex
 	jobs       map[string]*model.Job
 	jobsMu     sync.RWMutex
-	wsWriteMu  sync.Mutex // one writer at a time per connection (Gorilla WS); serializes all client writes
-	workerPool *WorkerPool
+	wsWriteMu  sync.Mutex
+	workerPool *worker.Pool
 	processor  *processor.BatchProcessor
 	startTime  time.Time
 }
@@ -52,11 +48,11 @@ func New(cfg *config.Config) *Server {
 		workers = 1
 	}
 	s := &Server{
-		cfg:        cfg,
-		mux:        http.NewServeMux(),
-		startTime:  time.Now(),
-		clients:    make(map[*websocket.Conn]bool),
-		jobs:       make(map[string]*model.Job),
+		cfg:       cfg,
+		mux:       http.NewServeMux(),
+		startTime: time.Now(),
+		clients:   make(map[*websocket.Conn]bool),
+		jobs:      make(map[string]*model.Job),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -96,7 +92,7 @@ func New(cfg *config.Config) *Server {
 
 	s.processor = processor.NewBatchProcessor(s.ocr, s, s, s.rag, s.workflow, s, cfg.MaxConcurrent)
 
-	wp := NewWorkerPool(workers)
+	wp := worker.New(workers)
 	wp.SetJobUpdater(func(id string, upd func(*model.Job)) {
 		s.updateJob(id, upd)
 	})
@@ -126,7 +122,6 @@ func (s *Server) Router() http.Handler {
 	})
 }
 
-// BatchProcessor exposes the batch processor for benchmarks and integration tests.
 func (s *Server) BatchProcessor() *processor.BatchProcessor {
 	return s.processor
 }
@@ -143,6 +138,8 @@ func (s *Server) Shutdown() {
 		conn.Close()
 	}
 	s.clientsMu.Unlock()
+
+	s.workflow.Close()
 }
 
 func (s *Server) wsWriteJSON(conn *websocket.Conn, v interface{}) error {
@@ -184,7 +181,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/v1/cases/", s.handleCases)
 	s.mux.HandleFunc("/v1/documents/", s.handleDocuments)
 
-	s.mux.Handle("/", http.FileServer(http.Dir("./frontend")))
+	s.mux.Handle("/", http.FileServer(http.Dir(resolveFrontendDir())))
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -195,6 +192,11 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, data interface{}) 
 
 func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 	s.writeJSON(w, status, map[string]string{"error": message})
+}
+
+// decodeJSON is a convenience wrapper for parsing request bodies.
+func (s *Server) decodeJSON(r *http.Request, v interface{}) error {
+	return json.NewDecoder(r.Body).Decode(v)
 }
 
 func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
@@ -250,8 +252,6 @@ func (s *Server) updateJob(id string, fn func(*model.Job)) {
 	}
 }
 
-// Processor interface implementations
-
 func (s *Server) UpdateJob(id string, fn func(*model.Job)) {
 	s.updateJob(id, fn)
 }
@@ -269,6 +269,7 @@ func (s *Server) AnalyzeBatch(ctx context.Context, docs map[string]string) (proc
 	meta := processor.BatchMeta{
 		ClientName: raw.ClientName,
 		MatterType: raw.MatterType,
+		LLMError:   raw.LLMError,
 		Files:      make([]processor.FileMeta, len(raw.Files)),
 	}
 	for i, f := range raw.Files {
@@ -296,10 +297,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	wsN := len(s.clients)
 	s.clientsMu.Unlock()
 
+	s.jobsMu.RLock()
+	allJobs := make([]model.Job, 0, len(s.jobs))
+	for _, j := range s.jobs {
+		allJobs = append(allJobs, *j)
+	}
+	s.jobsMu.RUnlock()
+
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"version":        "v2-go",
 		"cases":          cases,
 		"case_count":     len(cases),
+		"jobs":           allJobs,
 		"rag":            ragSummary,
 		"max_cases":      s.cfg.MaxCases,
 		"max_concurrent": s.cfg.MaxConcurrent,
@@ -421,710 +430,6 @@ func (s *Server) broadcastStatus() {
 	}
 }
 
-func (s *Server) handleCases(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/v1/cases/")
-	parts := strings.Split(path, "/")
-	log.Printf("handleCases: path=[%s] parts=%v", path, parts)
-
-	if len(parts) == 0 || parts[0] == "" {
-		s.handleListCases(w, r)
-		return
-	}
-
-	caseID := parts[0]
-	if len(parts) == 1 {
-		s.handleGetCaseByID(w, r, caseID)
-		return
-	}
-
-	action := parts[1]
-	switch action {
-	case "advance":
-		s.handleAdvanceCaseByID(w, r, caseID)
-	case "approve":
-		s.handleApproveHITLByID(w, r, caseID)
-	case "delete":
-		s.handleDeleteCaseByID(w, r, caseID)
-	case "notes":
-		s.handleAddNoteByID(w, r, caseID)
-	case "orchestrate":
-		s.handleOrchestrateByID(w, r, caseID)
-	case "summarize":
-		s.handleSummarizeByID(w, r, caseID)
-	case "documents":
-		if len(parts) == 3 && parts[2] == "reassign" && r.Method == http.MethodPost {
-			s.handleReassignDocument(w, r, caseID)
-			return
-		}
-		if len(parts) >= 3 && (r.Method == http.MethodDelete || r.Method == http.MethodPost) {
-			filename := strings.Join(parts[2:], "/")
-			s.handleDeleteDocumentFromCase(w, r, caseID, filename)
-			return
-		}
-		s.writeError(w, http.StatusNotFound, "Action not found")
-	default:
-		// Check if it's a PUT request to update the case itself
-		if r.Method == http.MethodPut {
-			s.handleUpdateCaseByID(w, r, caseID)
-			return
-		}
-		s.writeError(w, http.StatusNotFound, "Action not found")
-	}
-}
-
-func (s *Server) handleReassignDocument(w http.ResponseWriter, r *http.Request, sourceCaseID string) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	var req struct {
-		Filename     string `json:"filename"`
-		TargetCaseID string `json:"target_case_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-	if req.Filename == "" || req.TargetCaseID == "" {
-		s.writeError(w, http.StatusBadRequest, "filename and target_case_id are required")
-		return
-	}
-	if sourceCaseID == req.TargetCaseID {
-		s.writeError(w, http.StatusBadRequest, "source and target case must differ")
-		return
-	}
-
-	fn := rag.NormalizeLogicalName(req.Filename)
-
-	srcSnap, ok := s.workflow.GetCaseSnapshot(sourceCaseID)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "Case not found")
-		return
-	}
-	tgtSnap, ok := s.workflow.GetCaseSnapshot(req.TargetCaseID)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "Target case not found")
-		return
-	}
-
-	onSource := false
-	for _, d := range srcSnap.UploadedDocuments {
-		if rag.NormalizeLogicalName(d) == fn {
-			onSource = true
-			break
-		}
-	}
-	if !onSource {
-		s.writeError(w, http.StatusBadRequest, "Document not on this case")
-		return
-	}
-
-	for _, f := range tgtSnap.UploadedDocuments {
-		if rag.NormalizeLogicalName(f) == fn {
-			s.writeError(w, http.StatusConflict, "Target case already has this document")
-			return
-		}
-	}
-
-	var merge map[string]interface{}
-	for _, row := range srcSnap.AIFileSummaries {
-		if row == nil {
-			continue
-		}
-		sfn, _ := row["filename"].(string)
-		if rag.NormalizeLogicalName(sfn) != fn {
-			continue
-		}
-		merge = make(map[string]interface{})
-		for k, v := range row {
-			if k == "filename" {
-				continue
-			}
-			merge[k] = v
-		}
-		break
-	}
-
-	if err := s.workflow.DetachDocument(sourceCaseID, fn); err != nil {
-		s.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if len(merge) > 0 {
-		s.workflow.AttachDocument(req.TargetCaseID, fn, merge)
-	} else {
-		s.workflow.AttachDocument(req.TargetCaseID, fn)
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]string{
-		"status":         "reassigned",
-		"source_case_id": sourceCaseID,
-		"target_case_id": req.TargetCaseID,
-		"filename":       fn,
-	})
-}
-
-func (s *Server) handleDeleteDocumentFromCase(w http.ResponseWriter, r *http.Request, caseID string, filename string) {
-	decoded, err := url.QueryUnescape(filename)
-	if err == nil {
-		filename = decoded
-	}
-
-	if err := s.workflow.DetachDocument(caseID, filename); err != nil {
-		s.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Also remove from RAG (optional, but good for cleanup)
-	s.rag.DeleteDocument(filename)
-
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-func (s *Server) handleUpdateCaseByID(w http.ResponseWriter, r *http.Request, caseID string) {
-	if r.Method != http.MethodPut {
-		s.writeError(w, http.StatusMethodNotAllowed, "PUT required")
-		return
-	}
-
-	var req struct {
-		ClientName string `json:"client_name"`
-		MatterType string `json:"matter_type"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	if err := s.workflow.UpdateCase(caseID, req.ClientName, req.MatterType); err != nil {
-		s.writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
-}
-
-func (s *Server) handleListCases(w http.ResponseWriter, r *http.Request) {
-	cases := s.workflow.ListCases()
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"cases": cases,
-		"count": len(cases),
-	})
-}
-
-func (s *Server) handleCreateCase(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	var req struct {
-		ClientName    string `json:"client_name"`
-		MatterType    string `json:"matter_type"`
-		SourceChannel string `json:"source_channel"`
-		InitialMsg    string `json:"initial_msg"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	if req.ClientName == "" {
-		req.ClientName = "Unknown Client"
-	}
-	if req.MatterType == "" {
-		req.MatterType = "Civil Litigation"
-	}
-
-	c := s.workflow.CreateCase(req.ClientName, req.MatterType, req.SourceChannel, req.InitialMsg)
-	s.writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"case_id": c.CaseID,
-		"case":    c,
-	})
-}
-
-func (s *Server) handleGetCaseByID(w http.ResponseWriter, r *http.Request, caseID string) {
-	c, ok := s.workflow.GetCaseSnapshot(caseID)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "Case not found")
-		return
-	}
-	s.writeJSON(w, http.StatusOK, c)
-}
-
-func (s *Server) handleAdvanceCaseByID(w http.ResponseWriter, r *http.Request, caseID string) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	if err := s.workflow.AdvanceState(caseID); err != nil {
-		s.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]string{
-		"status":  "advanced",
-		"case_id": caseID,
-	})
-}
-
-func (s *Server) handleDeleteCaseByID(w http.ResponseWriter, r *http.Request, caseID string) {
-	if r.Method != http.MethodDelete && r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "DELETE or POST required")
-		return
-	}
-
-	c, ok := s.workflow.GetCaseSnapshot(caseID)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "Case not found")
-		return
-	}
-
-	// Clean up documents in RAG
-	for _, docName := range c.UploadedDocuments {
-		s.rag.DeleteDocument(docName)
-	}
-
-	if err := s.workflow.DeleteCase(caseID); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-func (s *Server) handleApproveHITLByID(w http.ResponseWriter, r *http.Request, caseID string) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	var req struct {
-		State    string `json:"state"`
-		Approved bool   `json:"approved"`
-		Reason   string `json:"reason"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	if err := s.workflow.ApproveHITL(caseID, req.State, req.Approved, req.Reason); err != nil {
-		s.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]string{
-		"status":  "approved",
-		"case_id": caseID,
-	})
-}
-
-func (s *Server) handleAddNoteByID(w http.ResponseWriter, r *http.Request, caseID string) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	var req struct {
-		Text string `json:"text"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	s.workflow.AddNote(caseID, req.Text)
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "added"})
-}
-
-// resolveCaseForDocument finds a case by extracted client name, or creates one.
-// Uploads that resolve to "Unknown Client" never merge with each other; each gets an English
-// intake label derived from the file stem (no legacy 待分类 bucket).
-func (s *Server) resolveCaseForDocument(clientName, matterType, logicalName string) string {
-	var caseID string
-	if clientName != "Unknown Client" {
-		for _, c := range s.workflow.ListCases() {
-			if c.ClientName == clientName {
-				caseID = c.CaseID
-				break
-			}
-		}
-	}
-	if caseID != "" {
-		return caseID
-	}
-
-	displayName := clientName
-	if clientName == "Unknown Client" {
-		stem := strings.TrimSuffix(logicalName, filepath.Ext(logicalName))
-		if stem == "" {
-			stem = strings.TrimSpace(logicalName)
-		}
-		rr := []rune(stem)
-		if len(rr) > 48 {
-			stem = string(rr[:48]) + "…"
-		}
-		if stem == "" {
-			stem = "upload"
-		}
-		displayName = "Intake matter — " + stem
-	}
-
-	c := s.workflow.CreateCase(displayName, matterType, "Upload", "")
-	return c.CaseID
-}
-
-// attachBatchUploadsToCase records workflow attachments for uploads that were ingested without a case_id.
-func (s *Server) attachBatchUploadsToCase(caseID string, uploaded interface{}) {
-	if caseID == "" {
-		return
-	}
-	names, ok := uploaded.([]string)
-	if !ok || len(names) == 0 {
-		return
-	}
-	for _, name := range names {
-		s.workflow.AttachDocument(caseID, name)
-	}
-}
-
-// allowedDirectoryUnderDataDir returns an absolute path only if dir is contained within DataDir (no path escape).
-func (s *Server) allowedDirectoryUnderDataDir(dir string) (string, error) {
-	absBase, err := filepath.Abs(s.cfg.DataDir)
-	if err != nil {
-		return "", err
-	}
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(absBase, absDir)
-	if err != nil {
-		return "", fmt.Errorf("invalid directory path")
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("directory must be under server data directory %s", absBase)
-	}
-	return absDir, nil
-}
-
-func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
-
-	if err := r.ParseMultipartForm(50 << 20); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Failed to parse form")
-		return
-	}
-	defer func() {
-		if r.MultipartForm != nil {
-			_ = r.MultipartForm.RemoveAll()
-		}
-	}()
-
-	reqCaseID := strings.TrimSpace(r.FormValue("case_id"))
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, "No file uploaded")
-		return
-	}
-	defer file.Close()
-
-	logicalName := sanitizeUploadedBasename(header.Filename)
-	if logicalName == "" {
-		s.writeError(w, http.StatusBadRequest, "Invalid filename")
-		return
-	}
-
-	os.MkdirAll(filepath.Join(s.cfg.DataDir, "docs"), 0755)
-	savePath := filepath.Join(s.cfg.DataDir, "docs", fmt.Sprintf("%d-%s", time.Now().UnixNano(), logicalName))
-
-	dst, err := os.Create(savePath)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "Failed to save file")
-		return
-	}
-	defer dst.Close()
-
-	written, err := io.Copy(dst, file)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "Failed to write file")
-		return
-	}
-	fileSize := header.Size
-	if fileSize <= 0 && written > 0 {
-		fileSize = written
-	}
-
-	jobID := s.submitJob("upload", func(j *model.Job) (any, error) {
-		s.updateJob(j.ID, func(job *model.Job) { job.Progress = 12 })
-		text, err := s.ocr.ScanFile(savePath)
-		if err != nil {
-			log.Printf("OCR error: %v", err)
-			text = fmt.Sprintf("[OCR Error] %v", err)
-		}
-
-		s.updateJob(j.ID, func(job *model.Job) { job.Progress = 38 })
-		meta := map[string]interface{}{
-			"filename": logicalName,
-			"size":     fileSize,
-		}
-		var classification map[string]interface{}
-		if cls := s.classifyLegalDocumentFromOCR(text, logicalName); cls != nil {
-			meta["classification"] = cls
-			classification = cls
-		}
-		if err := s.rag.IngestFile(savePath, text, meta); err != nil {
-			return nil, fmt.Errorf("ingestion failed: %v", err)
-		}
-
-		var finalCaseID string
-		var clientName, matterType, intakeSrc string
-
-		if reqCaseID != "" {
-			// Explicit target case, skip heavy Intake inference
-			finalCaseID = reqCaseID
-			snap, ok := s.workflow.GetCaseSnapshot(finalCaseID)
-			if ok {
-				clientName = snap.ClientName
-				matterType = snap.MatterType
-				intakeSrc = "explicit_ui"
-			}
-			s.updateJob(j.ID, func(job *model.Job) { job.Progress = 70 })
-		} else {
-			// Infer from document to create/route to a case
-			s.updateJob(j.ID, func(job *model.Job) { job.Progress = 48 })
-			clientName, matterType, intakeSrc = s.inferIntakeFromOCR(text, logicalName)
-			finalCaseID = s.resolveCaseForDocument(clientName, matterType, logicalName)
-			s.updateJob(j.ID, func(job *model.Job) { job.Progress = 90 })
-		}
-
-		if classification != nil {
-			s.workflow.AttachDocument(finalCaseID, logicalName, map[string]interface{}{
-				"classification": classification,
-			})
-		} else {
-			s.workflow.AttachDocument(finalCaseID, logicalName)
-		}
-
-		out := map[string]interface{}{
-			"status":        "uploaded",
-			"filename":      logicalName,
-			"case_id":       finalCaseID,
-			"client_name":   clientName,
-			"matter_type":   matterType,
-			"intake_source": intakeSrc,
-			"text_length":   len(text),
-		}
-		if classification != nil {
-			out["classification"] = classification
-		}
-		return out, nil
-	})
-
-	s.writeJSON(w, http.StatusAccepted, map[string]interface{}{
-		"job_id":   jobID,
-		"filename": logicalName,
-	})
-}
-
-func (s *Server) handleUploadBatch(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
-
-	if err := r.ParseMultipartForm(500 << 20); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Failed to parse form")
-		return
-	}
-	defer func() {
-		if r.MultipartForm != nil {
-			_ = r.MultipartForm.RemoveAll()
-		}
-	}()
-
-	reqCaseID := strings.TrimSpace(r.FormValue("case_id"))
-	fileHeaders := r.MultipartForm.File["files"]
-
-	if len(fileHeaders) == 0 {
-		s.writeError(w, http.StatusBadRequest, "No files uploaded")
-		return
-	}
-
-	os.MkdirAll(filepath.Join(s.cfg.DataDir, "docs"), 0755)
-
-	var savedFiles []string
-	for _, header := range fileHeaders {
-		file, err := header.Open()
-		if err != nil {
-			continue
-		}
-
-		logicalName := sanitizeUploadedBasename(header.Filename)
-		if logicalName == "" {
-			file.Close()
-			continue
-		}
-
-		if strings.HasSuffix(strings.ToLower(logicalName), ".zip") {
-			tmpZipPath := filepath.Join(s.cfg.DataDir, "docs", fmt.Sprintf("tmp-%d-%s", time.Now().UnixNano(), logicalName))
-			tmpZip, _ := os.Create(tmpZipPath)
-			io.Copy(tmpZip, file)
-			tmpZip.Close()
-			file.Close()
-
-			reader, err := zip.OpenReader(tmpZipPath)
-			if err == nil {
-				for _, f := range reader.File {
-					if f.FileInfo().IsDir() {
-						continue
-					}
-					rc, err := f.Open()
-					if err != nil {
-						continue
-					}
-					fName := sanitizeUploadedBasename(filepath.Base(f.Name))
-					if fName != "" {
-						outPath := filepath.Join(s.cfg.DataDir, "docs", fmt.Sprintf("%d-%s", time.Now().UnixNano(), fName))
-						dst, err := os.Create(outPath)
-						if err == nil {
-							io.Copy(dst, rc)
-							dst.Close()
-							savedFiles = append(savedFiles, outPath)
-						}
-					}
-					rc.Close()
-				}
-				reader.Close()
-			}
-			os.Remove(tmpZipPath)
-			continue
-		}
-
-		savePath := filepath.Join(s.cfg.DataDir, "docs", fmt.Sprintf("%d-%s", time.Now().UnixNano(), logicalName))
-		dst, err := os.Create(savePath)
-		if err == nil {
-			io.Copy(dst, file)
-			dst.Close()
-			savedFiles = append(savedFiles, savePath)
-		}
-		file.Close()
-	}
-
-	jobID := s.submitJob("batch_upload", func(j *model.Job) (any, error) {
-		return s.processBatchUpload(j, savedFiles, reqCaseID)
-	})
-
-	s.writeJSON(w, http.StatusAccepted, map[string]interface{}{
-		"job_id": jobID,
-	})
-}
-
-func (s *Server) processBatchUpload(j *model.Job, files []string, reqCaseID string) (any, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
-	defer cancel()
-
-	opts := processor.Options{
-		CaseID: reqCaseID,
-	}
-
-	result, err := s.processor.ProcessBatch(ctx, j.ID, files, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	// Post-processing for empty CaseID (automatic routing)
-	if reqCaseID == "" {
-		res := result.(map[string]interface{})
-		clientName, _ := res["client_name"].(string)
-		matterType, _ := res["matter_type"].(string)
-
-		targetCaseID := s.resolveCaseForDocument(clientName, matterType, "Batch Root")
-		res["case_id"] = targetCaseID
-		s.attachBatchUploadsToCase(targetCaseID, res["uploaded"])
-	}
-
-	return result, nil
-}
-
-func (s *Server) handleUploadDirectory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	var req struct {
-		DirectoryPath string `json:"directory_path"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	allowedDir, err := s.allowedDirectoryUnderDataDir(req.DirectoryPath)
-	if err != nil {
-		s.writeError(w, http.StatusForbidden, err.Error())
-		return
-	}
-
-	var files []string
-	err = filepath.WalkDir(allowedDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() {
-			files = append(files, path)
-		}
-		return nil
-	})
-
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Cannot read directory: %v", err))
-		return
-	}
-
-	jobID := s.submitJob("directory_upload", func(j *model.Job) (any, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-
-		result, err := s.processor.ProcessBatch(ctx, j.ID, files, processor.Options{})
-		if err != nil {
-			return nil, err
-		}
-
-		res := result.(map[string]interface{})
-		clientName, _ := res["client_name"].(string)
-		matterType, _ := res["matter_type"].(string)
-
-		if clientName != "" && clientName != "Unknown Client" {
-			targetCaseID := s.resolveCaseForDocument(clientName, matterType, "Directory Root")
-			res["case_id"] = targetCaseID
-			s.attachBatchUploadsToCase(targetCaseID, res["uploaded"])
-		}
-
-		return result, nil
-	})
-
-	s.writeJSON(w, http.StatusAccepted, map[string]interface{}{
-		"job_id": jobID,
-	})
-}
-
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
@@ -1159,169 +464,21 @@ func (s *Server) handleRAGSummary(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, summary)
 }
 
-func (s *Server) handleDocuments(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/v1/documents/")
-	parts := strings.Split(path, "/")
-	if len(parts) == 0 || parts[0] == "" {
-		s.handleListDocuments(w, r)
-		return
-	}
-
-	filename := parts[0]
-	if len(parts) == 1 {
-		// Default to metadata if no action
-		s.handleDocumentMetadataByID(w, r, filename)
-		return
-	}
-
-	action := parts[1]
-	switch action {
-	case "view":
-		s.handleViewDocumentByID(w, r, filename)
-	case "content":
-		s.handleDocumentContentByID(w, r, filename)
-	case "metadata":
-		s.handleDocumentMetadataByID(w, r, filename)
-	default:
-		s.writeError(w, http.StatusNotFound, "Action not found")
-	}
-}
-
-func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
-	summary := s.rag.GetSummary()
-	s.writeJSON(w, http.StatusOK, summary)
-}
-
-// wsLoopbackEquivalent reports whether originHost and requestHost refer to the same
-// loopback endpoint (e.g. localhost:8000 vs 127.0.0.1:8000). Browsers send Origin
-// based on the URL bar; Host can differ, which would otherwise fail WebSocket upgrades.
-func wsLoopbackEquivalent(originHost, requestHost string) bool {
-	oh, op, errO := net.SplitHostPort(originHost)
-	if errO != nil {
-		oh, op = originHost, ""
-	}
-	rh, rp, errR := net.SplitHostPort(requestHost)
-	if errR != nil {
-		rh, rp = requestHost, ""
-	}
-	if op != "" && rp != "" && op != rp {
-		return false
-	}
-	normalize := func(host string) string {
-		h := strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
-		if strings.EqualFold(h, "localhost") {
-			return "127.0.0.1"
-		}
-		if ip := net.ParseIP(h); ip != nil && ip.IsLoopback() {
-			return "127.0.0.1"
-		}
-		return strings.ToLower(h)
-	}
-	return normalize(oh) == normalize(rh)
-}
-
-func unescapeURLPathSegment(seg string) string {
-	out := seg
-	for i := 0; i < 3; i++ {
-		dec, err := url.PathUnescape(out)
-		if err != nil || dec == out {
-			break
-		}
-		out = dec
-	}
-	return out
-}
-
-func truncateRunesStr(s string, maxRunes int) string {
-	if maxRunes <= 0 || utf8.RuneCountInString(s) <= maxRunes {
-		return s
-	}
-	r := []rune(s)
-	return string(r[:maxRunes])
-}
-
-// resolveDocDiskPath finds bytes on disk if the RAG-stored path is stale (cwd/data dir changed).
-func (s *Server) resolveDocDiskPath(doc model.DocumentRecord) (abs string, ok bool) {
-	candidates := []string{
-		doc.Path,
-		filepath.Join(s.cfg.DataDir, "docs", filepath.Base(doc.Path)),
-	}
-	if wd, err := os.Getwd(); err == nil {
-		if !filepath.IsAbs(doc.Path) {
-			candidates = append(candidates, filepath.Join(wd, doc.Path))
-		}
-		candidates = append(candidates, filepath.Join(wd, s.cfg.DataDir, "docs", filepath.Base(doc.Path)))
-	}
-	seen := map[string]bool{}
-	for _, p := range candidates {
-		if p == "" || seen[p] {
-			continue
-		}
-		seen[p] = true
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return p, true
+// resolveFrontendDir finds the frontend directory whether running from source or .app bundle.
+func resolveFrontendDir() string {
+	if exe, err := os.Executable(); err == nil {
+		// macOS .app bundle: binary is at Contents/MacOS/agentflow, frontend at Contents/Resources/frontend
+		bundleFrontend := filepath.Join(filepath.Dir(exe), "..", "Resources", "frontend")
+		if fi, err := os.Stat(bundleFrontend); err == nil && fi.IsDir() {
+			return bundleFrontend
 		}
 	}
-	return doc.Path, false
-}
-
-func (s *Server) handleViewDocumentByID(w http.ResponseWriter, r *http.Request, filename string) {
-	filename = unescapeURLPathSegment(filename)
-
-	doc, ok := s.rag.GetDocumentFlex(filename)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "Document not found")
-		return
+	for _, dir := range []string{"frontend-v2", "frontend"} {
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			return dir
+		}
 	}
-
-	diskPath, found := s.resolveDocDiskPath(doc)
-	if !found {
-		log.Printf("[view] missing file for %q tried path %q", doc.Filename, doc.Path)
-		s.writeError(w, http.StatusNotFound, "File not found on disk")
-		return
-	}
-
-	// Help browsers embed PDFs/images in iframes on same origin
-	w.Header().Set("Content-Disposition", "inline; filename=\""+filepath.Base(doc.Filename)+"\"")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	http.ServeFile(w, r, diskPath)
-}
-
-func (s *Server) handleDocumentContentByID(w http.ResponseWriter, r *http.Request, filename string) {
-	decoded, err := url.QueryUnescape(filename)
-	if err == nil {
-		filename = decoded
-	}
-
-	doc, ok := s.rag.GetDocumentFlex(filename)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "Document not found")
-		return
-	}
-
-	content := strings.Join(doc.Chunks, "\n\n")
-	s.writeJSON(w, http.StatusOK, map[string]string{
-		"content": content,
-	})
-}
-
-func (s *Server) handleDocumentMetadataByID(w http.ResponseWriter, r *http.Request, filename string) {
-	filename = unescapeURLPathSegment(filename)
-
-	doc, ok := s.rag.GetDocumentFlex(filename)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "Document not found")
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"filename":  doc.Filename,
-		"path":      doc.Path,
-		"file_type": doc.FileType,
-		"size":      doc.FileSizeBytes,
-		"chunks":    len(doc.Chunks),
-		"metadata":  doc.AIMetadata,
-	})
+	return "frontend"
 }
 
 func (s *Server) handleDeviceStatus(w http.ResponseWriter, r *http.Request) {
@@ -1358,254 +515,4 @@ func (s *Server) handleDeviceStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.writeJSON(w, http.StatusOK, out)
-}
-
-// clipContext limits context length to prevent OOM/sidecar crash
-func clipContext(context string, maxLength int) string {
-	if len(context) > maxLength {
-		return context[:maxLength]
-	}
-	return context
-}
-
-func (s *Server) handleOrchestrateByID(w http.ResponseWriter, r *http.Request, caseID string) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	var req struct {
-		Objective string `json:"objective"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	c, ok := s.workflow.GetCaseSnapshot(caseID)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "Case not found")
-		return
-	}
-
-	results := s.rag.Search(c.MatterType+" "+c.ClientName, 5)
-	context := ""
-	for _, r := range results {
-		context += r.Chunk + "\n\n"
-	}
-
-	context = clipContext(context, 12000)
-
-	prompt := fmt.Sprintf(
-		"你是中国法律业务助手。请结合「检索摘录」仅为当事人 %s、案由类型 %s 撰写关于「%s」的书面要点。"+
-			"要求：中文；区分事实摘录与你的法律分析；材料不足处明确写「检索材料不足」；不要编造案号或未出现的当事人。",
-		c.ClientName,
-		c.MatterType,
-		req.Objective,
-	)
-
-	synthesis, err := s.llm.Generate(prompt, context, llm.GenerationConfig{
-		MaxTokens: 8192,
-		Temp:      0.08,
-	})
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("LLM error: %v", err))
-		return
-	}
-
-	result := model.OrchestrationResult{
-		Objective: req.Objective,
-		Synthesis: synthesis,
-		RanAt:     time.Now().Format(time.RFC3339),
-	}
-
-	s.writeJSON(w, http.StatusOK, result)
-}
-
-func (s *Server) handleSummarizeByID(w http.ResponseWriter, r *http.Request, caseID string) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	c, ok := s.workflow.GetCaseSnapshot(caseID)
-	if !ok {
-		s.writeError(w, http.StatusNotFound, "Case not found")
-		return
-	}
-
-	docContext := ""
-	for _, fn := range c.UploadedDocuments {
-		doc, ok := s.rag.GetDocumentFlex(fn)
-		if ok {
-			for _, chunk := range doc.Chunks {
-				docContext += chunk + "\n"
-			}
-		}
-	}
-
-	if docContext == "" {
-		s.writeJSON(w, http.StatusOK, map[string]string{
-			"summary": "暂无可用文档材料进行总结。",
-		})
-		return
-	}
-
-	docContext = truncateRunesStr(docContext, 10000)
-
-	caseMeta := fmt.Sprintf(
-		"【案件元信息】当事人/案件名称（系统）: %s\n案由类型: %s\n当前工作流阶段: %s\n材料来自以下文件: %s\n\n",
-		c.ClientName,
-		c.MatterType,
-		c.State,
-		strings.Join(c.UploadedDocuments, ", "),
-	)
-	context := caseMeta + "【材料摘录】\n" + docContext + "\n【材料摘录结束】"
-
-	prompt := `你是一名严谨的中国执业律师助理。只能根据上方【材料摘录】与【案件元信息】中已出现的内容作答；材料未明确记载的事项请写「材料未载明」，禁止臆测、编造法院案号或未出现的日期/金额。
-
-请用中文输出一份结构化案件摘要，总字数不超过650字。使用 Markdown 二级标题：
-
-## 一、案件概述
-## 二、当事人与请求
-## 三、关键事实与证据（标注是否材料中已载明）
-## 四、风险与后续建议（区分事实与法律意见）
-
-写作要求：客观、短句、可核查；关键数字与日期务必与原文一致；若材料仅为扫描件识别结果，可在末尾一句提示核实原件。`
-
-	// MLX local models: keep context rune-bounded (byte slice used to break UTF-8) and prompt size modest to avoid sidecar failures.
-	ctxLLM := truncateRunesStr(context, 4800)
-	summary, err := s.llm.Generate(prompt, ctxLLM, llm.GenerationConfig{
-		MaxTokens: 2048,
-		Temp:      0.08,
-	})
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("LLM error: %v", err))
-		return
-	}
-
-	if err := s.workflow.SetAICaseSummary(caseID, summary); err != nil {
-		log.Printf("SetAICaseSummary: %v", err)
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]string{
-		"case_id": caseID,
-		"summary": summary,
-	})
-}
-
-func sanitizeUploadedBasename(name string) string {
-	b := filepath.Base(name)
-	b = strings.ReplaceAll(b, string(os.PathSeparator), "_")
-	b = strings.ReplaceAll(b, "/", "_")
-	b = strings.ReplaceAll(b, "..", "_")
-	b = strings.TrimSpace(b)
-	if b == "" || b == "." {
-		return ""
-	}
-	return b
-}
-
-func extractMatterType(filename string) string {
-	type hint struct {
-		keyword string
-		matter  string
-	}
-	hints := []hint{
-		{"买卖", "Sales Contract Dispute"},
-		{"租赁", "Lease Dispute"},
-		{"劳务", "Labor Dispute"},
-		{"劳动", "Labor Dispute"},
-		{"借贷", "Loan Dispute"},
-		{"欠款", "Debt Dispute"},
-		{"合同", "Contract Dispute"},
-		{"起诉", "Civil Litigation"},
-		{"诉讼", "Civil Litigation"},
-	}
-
-	for _, h := range hints {
-		if strings.Contains(filename, h.keyword) {
-			return h.matter
-		}
-	}
-
-	return "Civil Litigation"
-}
-
-func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "GET required")
-		return
-	}
-
-	backend := llm.BackendOllama
-	if s.cfg.LLMBackend == "dashscope" {
-		backend = llm.BackendOpenAICompat
-	}
-
-	baseURL := s.cfg.OllamaURL
-	if backend == llm.BackendOpenAICompat {
-		baseURL = s.cfg.DashScopeBaseURL
-	}
-
-	models, err := llm.ListModels(backend, baseURL)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list models: %v", err))
-		return
-	}
-
-	for i := range models {
-		if models[i].ID == s.cfg.ModelName {
-			models[i].IsDefault = true
-		}
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"models":  models,
-		"backend": s.cfg.LLMBackend,
-		"current": s.cfg.ModelName,
-	})
-}
-
-func (s *Server) handleBenchmarkModel(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	var req struct {
-		ModelID  string  `json:"model_id"`
-		Prompt   string  `json:"prompt,omitempty"`
-		Context  string  `json:"context,omitempty"`
-		MaxTok   int     `json:"max_tokens,omitempty"`
-		Temp     float64 `json:"temperature,omitempty"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	modelID := req.ModelID
-	if modelID == "" {
-		modelID = s.cfg.ModelName
-	}
-
-	var result llm.BenchmarkResult
-	if req.Prompt != "" {
-		maxTok := req.MaxTok
-		if maxTok <= 0 {
-			maxTok = 500
-		}
-		temp := req.Temp
-		if temp <= 0 {
-			temp = 0.1
-		}
-		result = s.llm.BenchmarkWithPrompt(modelID, req.Prompt, req.Context, maxTok, temp)
-	} else {
-		result = s.llm.Benchmark(modelID)
-	}
-
-	s.writeJSON(w, http.StatusOK, result)
 }
