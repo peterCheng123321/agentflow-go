@@ -306,6 +306,22 @@
         </div>
     </div>
 
+    <!-- Generic Dialog (prompt/confirm replacement) -->
+    <div id="app-modal" class="fixed inset-0 z-[60] hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
+        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200" data-modal-panel>
+            <h2 id="app-modal-title" class="text-xl font-bold text-white"></h2>
+            <p id="app-modal-body" class="text-sm text-slate-400"></p>
+            <div id="app-modal-field" class="hidden">
+                <label id="app-modal-label" class="text-[10px] font-bold text-slate-500 uppercase"></label>
+                <input id="app-modal-input" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all">
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button id="app-modal-confirm" class="flex-1 py-3 rounded-xl text-white text-sm font-bold shadow-lg"></button>
+                <button id="app-modal-cancel" class="px-6 py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const API = window.location.origin + "/v1";
 
@@ -322,7 +338,96 @@
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;");
         }
-        
+
+        function openModal(opts) {
+            const {
+                type = "confirm",
+                title = "",
+                body = "",
+                label = "",
+                placeholder = "",
+                defaultValue = "",
+                confirmText,
+                cancelText = "Cancel",
+                intent = "primary",
+            } = opts || {};
+
+            const modal = document.getElementById("app-modal");
+            const panel = modal.querySelector("[data-modal-panel]");
+            const titleEl = document.getElementById("app-modal-title");
+            const bodyEl = document.getElementById("app-modal-body");
+            const fieldEl = document.getElementById("app-modal-field");
+            const labelEl = document.getElementById("app-modal-label");
+            const inputEl = document.getElementById("app-modal-input");
+            const confirmBtn = document.getElementById("app-modal-confirm");
+            const cancelBtn = document.getElementById("app-modal-cancel");
+
+            titleEl.textContent = title;
+            bodyEl.textContent = body;
+            bodyEl.classList.toggle("hidden", !body);
+
+            if (type === "prompt") {
+                fieldEl.classList.remove("hidden");
+                labelEl.textContent = label;
+                inputEl.value = defaultValue;
+                inputEl.placeholder = placeholder;
+            } else {
+                fieldEl.classList.add("hidden");
+            }
+
+            confirmBtn.textContent = confirmText || (type === "prompt" ? "Save" : intent === "danger" ? "Delete" : "Confirm");
+            confirmBtn.className = "flex-1 py-3 rounded-xl text-white text-sm font-bold shadow-lg " +
+                (intent === "danger" ? "bg-rose-600 shadow-rose-600/20" : "bg-brand-600 shadow-brand-600/20");
+            cancelBtn.textContent = cancelText;
+
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+
+            const previouslyFocused = document.activeElement;
+            const focusables = () => Array.from(panel.querySelectorAll(
+                'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            )).filter(el => !el.disabled && el.offsetParent !== null);
+
+            (type === "prompt" ? inputEl : confirmBtn).focus();
+
+            return new Promise((resolve) => {
+                function cleanup(value) {
+                    modal.classList.add("hidden");
+                    modal.classList.remove("flex");
+                    confirmBtn.onclick = null;
+                    cancelBtn.onclick = null;
+                    modal.onclick = null;
+                    inputEl.onkeydown = null;
+                    document.removeEventListener("keydown", onKey, true);
+                    if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+                    resolve(value);
+                }
+                function onConfirm() {
+                    cleanup(type === "prompt" ? inputEl.value.trim() : true);
+                }
+                function onCancel() {
+                    cleanup(type === "prompt" ? null : false);
+                }
+                function onKey(e) {
+                    if (e.key === "Escape") { e.preventDefault(); onCancel(); return; }
+                    if (e.key === "Tab") {
+                        const items = focusables();
+                        if (!items.length) return;
+                        const first = items[0];
+                        const last = items[items.length - 1];
+                        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+                        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+                    }
+                }
+                confirmBtn.onclick = onConfirm;
+                cancelBtn.onclick = onCancel;
+                modal.onclick = (e) => { if (e.target === modal) onCancel(); };
+                inputEl.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); onConfirm(); } };
+                document.addEventListener("keydown", onKey, true);
+            });
+        }
+
+
         const State = {
             cases: [],
             selectedCase: null,
@@ -685,7 +790,13 @@
 
             async deleteCase() {
                 if (!State.selectedCase) return;
-                if (!confirm(`Delete case for ${State.selectedCase.client_name}?`)) return;
+                const ok = await openModal({
+                    type: "confirm",
+                    title: "Delete case?",
+                    body: `This will permanently delete the case for ${State.selectedCase.client_name}.`,
+                    intent: "danger",
+                });
+                if (!ok) return;
                 try {
                     const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/delete`, { method: "POST" });
                     if (r.ok) {
@@ -697,7 +808,13 @@
             },
 
             async deleteDocument(caseId, filename) {
-                if (!confirm(`Delete document ${filename}?`)) return;
+                const ok = await openModal({
+                    type: "confirm",
+                    title: "Delete document?",
+                    body: `Permanently delete ${filename}.`,
+                    intent: "danger",
+                });
+                if (!ok) return;
                 try {
                     const r = await fetch(`${API}/cases/${caseId}/documents/${encodeURIComponent(filename)}`, { method: "DELETE" });
                     if (r.ok) {
