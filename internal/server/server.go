@@ -1303,26 +1303,56 @@ func truncateRunesStr(s string, maxRunes int) string {
 	return string(r[:maxRunes])
 }
 
-// resolveDocDiskPath finds bytes on disk if the RAG-stored path is stale (cwd/data dir changed).
+// resolveDocDiskPath finds bytes on disk if the RAG-stored path is stale
+// (cwd/data dir changed). It is robust to the current working directory,
+// relative vs absolute configured DataDir, and filenames containing unicode
+// or spaces. The canonical location (DataDir/docs/<basename>) is checked
+// first so uploaded bytes are found even if the RAG index stored a stale path.
 func (s *Server) resolveDocDiskPath(doc model.DocumentRecord) (abs string, ok bool) {
-	candidates := []string{
-		doc.Path,
-		filepath.Join(s.cfg.DataDir, "docs", filepath.Base(doc.Path)),
+	base := filepath.Base(doc.Path)
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		base = filepath.Base(doc.Filename)
 	}
-	if wd, err := os.Getwd(); err == nil {
-		if !filepath.IsAbs(doc.Path) {
+
+	// Resolve DataDir against cwd if it is relative, so lookups work no
+	// matter where the server was launched from.
+	dataDir := s.cfg.DataDir
+	wd, wdErr := os.Getwd()
+	var absDataDir string
+	if filepath.IsAbs(dataDir) {
+		absDataDir = dataDir
+	} else if wdErr == nil {
+		absDataDir = filepath.Join(wd, dataDir)
+	}
+
+	// Canonical location first — DataDir/docs/<basename> — so uploaded
+	// bytes are found even when the RAG index stored a stale path.
+	candidates := []string{}
+	if absDataDir != "" {
+		candidates = append(candidates, filepath.Join(absDataDir, "docs", base))
+	}
+	if dataDir != "" && dataDir != absDataDir {
+		candidates = append(candidates, filepath.Join(dataDir, "docs", base))
+	}
+	if doc.Path != "" {
+		candidates = append(candidates, doc.Path)
+		if !filepath.IsAbs(doc.Path) && wdErr == nil {
 			candidates = append(candidates, filepath.Join(wd, doc.Path))
 		}
-		candidates = append(candidates, filepath.Join(wd, s.cfg.DataDir, "docs", filepath.Base(doc.Path)))
 	}
+
 	seen := map[string]bool{}
 	for _, p := range candidates {
-		if p == "" || seen[p] {
+		if p == "" {
 			continue
 		}
-		seen[p] = true
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return p, true
+		cleaned := filepath.Clean(p)
+		if seen[cleaned] {
+			continue
+		}
+		seen[cleaned] = true
+		if fi, err := os.Stat(cleaned); err == nil && !fi.IsDir() {
+			return cleaned, true
 		}
 	}
 	return doc.Path, false
