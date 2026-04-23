@@ -72,6 +72,11 @@ func deepCopyCase(c *model.Case) model.Case {
 	if c.HITLApprovals != nil {
 		out.HITLApprovals = make(map[string]bool, len(c.HITLApprovals))
 		for k, v := range c.HITLApprovals {
+			// Drop approvals for states that are no longer registered as HITL
+			// gates (e.g. after a schema change) so stale keys don't persist.
+			if !hitlGates[k] {
+				continue
+			}
 			out.HITLApprovals[k] = v
 		}
 	}

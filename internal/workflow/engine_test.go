@@ -110,3 +110,41 @@ func TestEviction(t *testing.T) {
 		t.Errorf("Expected 2 cases, got %d", len(cases))
 	}
 }
+
+// TestDeepCopyCasePrunesStaleHITLApprovals verifies that snapshots returned to
+// callers do not include approvals for states that are no longer registered
+// as HITL gates.
+func TestDeepCopyCasePrunesStaleHITLApprovals(t *testing.T) {
+	e := NewEngine(10, nil)
+	c := e.CreateCase("T", "Civil", "test", "")
+
+	// Seed the underlying map with a known-good gate and a stale key that
+	// isn't in hitlGates (simulates a post-schema-change state).
+	e.mu.Lock()
+	raw := e.cases[c.CaseID]
+	for gate := range hitlGates {
+		raw.HITLApprovals[gate] = true
+		break
+	}
+	raw.HITLApprovals["RETIRED_STATE_FROM_OLD_SCHEMA"] = true
+	e.mu.Unlock()
+
+	snap, ok := e.GetCaseSnapshot(c.CaseID)
+	if !ok {
+		t.Fatal("case not found")
+	}
+	if _, stale := snap.HITLApprovals["RETIRED_STATE_FROM_OLD_SCHEMA"]; stale {
+		t.Errorf("snapshot included stale HITL approval key; got %v", snap.HITLApprovals)
+	}
+	// A real gate should still be present.
+	hasReal := false
+	for k := range snap.HITLApprovals {
+		if hitlGates[k] {
+			hasReal = true
+			break
+		}
+	}
+	if !hasReal {
+		t.Errorf("snapshot dropped a valid HITL approval; got %v", snap.HITLApprovals)
+	}
+}
