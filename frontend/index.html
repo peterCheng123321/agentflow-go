@@ -724,7 +724,7 @@
                 try {
                     const r = await fetch(`${API}/status`);
                     State.update(await r.json());
-                } catch (e) {}
+                } catch (e) { console.warn("refreshAll failed", e); }
             },
 
             async selectCase(id) { await State.fetchFullCase(id); },
@@ -944,7 +944,7 @@
                     document.getElementById("sys-platform").textContent = d.platform_id;
                     document.getElementById("sys-memory").textContent = d.memory_mb + " MB";
                     document.getElementById("sys-apple").textContent = d.is_apple_silicon ? "Yes" : "No";
-                } catch (e) {}
+                } catch (e) { console.warn("fetchSystemStatus failed", e); }
             },
 
             async advanceState(ev) {
@@ -1046,7 +1046,7 @@
                 State.update(d);
                 document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-amber-500";
                 document.getElementById("conn-text").textContent = "Live (HTTP)";
-            } catch (e) {}
+            } catch (e) { console.warn("pollStatusIfWSDead failed", e); }
         }
 
         setInterval(pollStatusIfWSDead, 4000);
