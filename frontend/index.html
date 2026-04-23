@@ -27,6 +27,10 @@
         .glass { background: rgba(30,41,59,0.4); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.05); }
         .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+        .is-busy { position: relative; pointer-events: none; }
+        .is-busy::after { content: ""; position: absolute; top: 50%; left: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
+        .is-busy > * { opacity: 0; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="min-h-screen bg-surface-0 text-slate-200 antialiased overflow-hidden font-sans">
@@ -123,10 +127,10 @@
                             <p id="case-matter" class="text-slate-400 text-sm font-medium">--</p>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="Actions.advanceState()" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-lg shadow-brand-600/20 active:scale-95 flex items-center gap-2">
+                            <button onclick="Actions.advanceState(event)" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-lg shadow-brand-600/20 active:scale-95 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                                 Next Step
                             </button>
-                            <button onclick="Actions.deleteCase()" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 transition-colors">
+                            <button onclick="Actions.deleteCase(event)" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                             </button>
                         </div>
@@ -699,6 +703,17 @@
             }
         };
 
+        async function withBusy(ev, fn) {
+            const btn = ev && ev.currentTarget instanceof HTMLButtonElement ? ev.currentTarget : null;
+            if (btn) {
+                if (btn.disabled) return;
+                btn.disabled = true;
+                btn.classList.add("is-busy");
+            }
+            try { return await fn(); }
+            finally { if (btn) { btn.disabled = false; btn.classList.remove("is-busy"); } }
+        }
+
         const Actions = {
             filterCases(query) {
                 State.caseFilter = query;
@@ -793,7 +808,7 @@
                 this.toggleModal('pdf-modal', true);
             },
 
-            async deleteCase() {
+            async deleteCase(ev) {
                 if (!State.selectedCase) return;
                 const ok = await openModal({
                     type: "confirm",
@@ -802,14 +817,16 @@
                     intent: "danger",
                 });
                 if (!ok) return;
-                try {
-                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/delete`, { method: "POST" });
-                    if (r.ok) {
-                        UI.toast("Case deleted", "success");
-                        State.selectedCase = null;
-                        this.refreshAll();
-                    }
-                } catch (e) { UI.toast("Delete failed", "error"); }
+                return withBusy(ev, async () => {
+                    try {
+                        const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/delete`, { method: "POST" });
+                        if (r.ok) {
+                            UI.toast("Case deleted", "success");
+                            State.selectedCase = null;
+                            this.refreshAll();
+                        }
+                    } catch (e) { UI.toast("Delete failed", "error"); }
+                });
             },
 
             async deleteDocument(caseId, filename) {
@@ -930,24 +947,26 @@
                 } catch (e) {}
             },
 
-            async advanceState() {
+            async advanceState(ev) {
                 if (!State.selectedCase) return;
-                try {
-                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/advance`, { method: "POST" });
-                    if (!r.ok) {
-                        let msg = "Could not advance";
-                        try {
-                            const d = await r.json();
-                            if (d.error) msg = d.error;
-                        } catch (_) {}
-                        UI.toast(msg, "error");
-                        if (msg.includes("HITL") || msg.includes("approval")) {
-                            UI.toast("Use the Human review panel below to approve or reject.", "info");
+                return withBusy(ev, async () => {
+                    try {
+                        const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/advance`, { method: "POST" });
+                        if (!r.ok) {
+                            let msg = "Could not advance";
+                            try {
+                                const d = await r.json();
+                                if (d.error) msg = d.error;
+                            } catch (_) {}
+                            UI.toast(msg, "error");
+                            if (msg.includes("HITL") || msg.includes("approval")) {
+                                UI.toast("Use the Human review panel below to approve or reject.", "info");
+                            }
+                            return;
                         }
-                        return;
-                    }
-                    this.refreshAll();
-                } catch (e) { UI.toast("Could not advance", "error"); }
+                        this.refreshAll();
+                    } catch (e) { UI.toast("Could not advance", "error"); }
+                });
             },
 
             async submitHITL(approved) {
