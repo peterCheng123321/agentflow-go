@@ -84,3 +84,39 @@ func TestRAGPersistence(t *testing.T) {
 		t.Error("Search score is 0 after restart")
 	}
 }
+
+func TestSearchCacheInvalidation(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "rag-cache-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m := NewManager(tempDir)
+
+	if err := m.IngestFile("purple.txt", "purple elephant in the room", nil); err != nil {
+		t.Fatalf("Ingest failed: %v", err)
+	}
+
+	results := m.Search("purple", 5)
+	if len(results) == 0 || results[0].Filename != "purple.txt" {
+		t.Fatalf("expected purple.txt in initial search results, got %+v", results)
+	}
+
+	if err := m.IngestFile("orange.txt", "orange tiger", nil); err != nil {
+		t.Fatalf("Ingest failed: %v", err)
+	}
+	results = m.Search("orange", 5)
+	if len(results) == 0 || results[0].Filename != "orange.txt" {
+		t.Fatalf("expected orange.txt surfaced after second ingest, got %+v", results)
+	}
+
+	m.DeleteDocument("purple.txt")
+
+	results = m.Search("purple", 5)
+	for _, r := range results {
+		if r.Filename == "purple.txt" {
+			t.Fatalf("deleted document purple.txt still surfaced in search: %+v", results)
+		}
+	}
+}
