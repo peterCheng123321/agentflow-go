@@ -20,6 +20,7 @@ struct DocumentViewer: View {
     @State private var dirty: Bool = false
     @State private var saving: Bool = false
     @State private var toast: String?
+    @State private var confirmDelete = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,12 +57,22 @@ struct DocumentViewer: View {
                 .buttonStyle(.afGhost)
 
                 Button(role: .destructive) {
-                    Task { await delete() }
+                    confirmDelete = true
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
                 .buttonStyle(.afGhost)
                 .disabled(caseID == nil)
+                .confirmationDialog(
+                    "Remove \(filename)?",
+                    isPresented: $confirmDelete,
+                    titleVisibility: .visible
+                ) {
+                    Button("Remove", role: .destructive) { Task { await delete() } }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This removes the document from this case.")
+                }
 
                 Button {
                     dismiss()

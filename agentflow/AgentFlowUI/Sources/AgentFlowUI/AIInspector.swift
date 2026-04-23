@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Right-pane AI inspector. Always-on chat surface with model picker, quick
-/// actions, and citation chips that hand off to the root DocumentViewer sheet.
 struct AIInspector: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var ai: AIController
@@ -10,24 +8,24 @@ struct AIInspector: View {
     @State private var input: String = ""
     @FocusState private var focused: Bool
 
+    private let aiGradient = LinearGradient(
+        colors: [Color(red: 0.72, green: 0.55, blue: 1.0), Color(red: 0.38, green: 0.65, blue: 1.0)],
+        startPoint: .topLeading, endPoint: .bottomTrailing)
+
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().opacity(0.2)
+            Divider().opacity(0.15)
             transcript
             composer
         }
         .background(
             Rectangle()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    LinearGradient(colors: [.black.opacity(0.25), .black.opacity(0.05)],
-                                   startPoint: .top, endPoint: .bottom)
-                )
+                .fill(.thinMaterial)
+                .overlay(LinearGradient(
+                    colors: [Color.white.opacity(0.05), Color.clear],
+                    startPoint: .top, endPoint: .bottom))
         )
-        .overlay(alignment: .leading) {
-            Rectangle().fill(Color.white.opacity(0.06)).frame(width: 1)
-        }
         .task { await ai.loadModelsIfNeeded(api: api) }
         .onChange(of: caseID) { _, new in ai.bind(toCase: new) }
     }
@@ -35,215 +33,293 @@ struct AIInspector: View {
     // MARK: - Header
 
     @ViewBuilder private var header: some View {
-        VStack(alignment: .leading, spacing: AF.Space.s) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            // Row 1: title + controls
+            HStack(spacing: 10) {
                 Image(systemName: "sparkles")
-                    .foregroundStyle(LinearGradient(
-                        colors: [Color(red: 0.55, green: 0.6, blue: 1.0),
-                                 Color(red: 0.85, green: 0.45, blue: 1.0)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                Text("Ask AI").font(.headline)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(aiGradient)
+
+                Text("Research desk")
+                    .font(.callout.weight(.semibold))
+
                 Spacer()
-                Button { router.toggleInspector() } label: {
-                    Image(systemName: "sidebar.right").foregroundStyle(.secondary)
+
+                // Docs search toggle
+                Button { ai.useRAG.toggle() } label: {
+                    Image(systemName: ai.useRAG ? "doc.text.fill" : "doc.text")
+                        .font(.system(size: 13))
+                        .foregroundStyle(ai.useRAG ? AF.Palette.tint(.blue) : Color.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Hide inspector (⌘⌥I)")
+                .help(ai.useRAG ? "Document search on — click to disable" : "Document search off — click to enable")
+
+                modelPicker
             }
 
-            modelPickerRow
-
+            // Row 2: context + clear
             HStack(spacing: 6) {
-                contextChip(
-                    icon: caseID == nil ? "globe" : "folder.fill",
-                    text: caseID.map { "Case " + String($0.suffix(8)) } ?? "Global"
-                )
-                Toggle(isOn: $ai.useRAG) {
-                    Label("RAG", systemImage: "magnifyingglass.circle")
-                        .labelStyle(.titleAndIcon)
-                        .font(.caption)
+                HStack(spacing: 5) {
+                    Image(systemName: caseID == nil ? "globe" : "folder.fill")
+                        .font(.caption2)
+                    Text(caseID.map { "Case " + String($0.suffix(8)) } ?? "Global context")
+                        .font(.caption.weight(.medium))
                 }
-                .toggleStyle(.switch)
-                .controlSize(.mini)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(Color.white.opacity(0.08)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                .foregroundStyle(.secondary)
+
                 Spacer()
+
+                if !ai.messages.isEmpty {
+                    Button { ai.reset() } label: {
+                        Text("Clear")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
-        .padding(AF.Space.m)
+        .padding(.horizontal, AF.Space.m)
+        .padding(.top, AF.Space.m)
+        .padding(.bottom, AF.Space.s)
     }
 
-    @ViewBuilder private var modelPickerRow: some View {
+    @ViewBuilder private var modelPicker: some View {
         Menu {
             ForEach(ai.models) { m in
-                Button {
-                    ai.selectedModelID = m.id
-                } label: {
+                Button { ai.selectedModelID = m.id } label: {
                     HStack {
                         Text(m.name)
                         if m.id == ai.selectedModelID {
-                            Spacer()
-                            Image(systemName: "checkmark")
+                            Spacer(); Image(systemName: "checkmark")
                         }
                     }
                 }
             }
             if ai.models.isEmpty {
-                Text("No models").foregroundStyle(.secondary)
+                Text("No models available").foregroundStyle(.secondary)
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "cpu")
-                Text(ai.selectedModel?.name ?? "Choose model")
+            HStack(spacing: 3) {
+                Image(systemName: "cpu").font(.system(size: 10))
+                Text(ai.selectedModel?.name ?? "Model")
+                    .font(.caption)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.down").font(.caption).foregroundStyle(.secondary)
+                Image(systemName: "chevron.down").font(.system(size: 8))
             }
-            .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                    .fill(Color.black.opacity(0.25))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                    .strokeBorder(.white.opacity(0.08), lineWidth: 1)
-            )
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7).padding(.vertical, 4)
+            .background(Capsule().fill(Color.white.opacity(0.06)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
     }
 
-    @ViewBuilder private func contextChip(icon: String, text: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon).font(.caption2)
-            Text(text).font(.caption.weight(.medium))
-        }
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Capsule().fill(Color.white.opacity(0.06)))
-        .overlay(Capsule().strokeBorder(.white.opacity(0.08), lineWidth: 1))
-        .foregroundStyle(.secondary)
-    }
-
     // MARK: - Transcript
 
     @ViewBuilder private var transcript: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: AF.Space.m) {
-                    if ai.messages.isEmpty {
-                        emptyState
-                    } else {
+        if ai.messages.isEmpty {
+            emptyState
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: AF.Space.m) {
                         ForEach(ai.messages) { m in messageBubble(m).id(m.id) }
-                        if !ai.lastSources.isEmpty {
-                            citationStrip(ai.lastSources)
-                        }
-                        if ai.isLoading {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                Text("Thinking…").font(.caption).foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, AF.Space.m)
-                        }
-                        if let err = ai.lastError {
-                            Text(err).font(.caption).foregroundStyle(.red)
-                                .padding(.horizontal, AF.Space.m)
-                        }
+                        if !ai.lastSources.isEmpty { citationStrip(ai.lastSources) }
+                        if ai.isLoading { thinkingBubble }
+                        if let err = ai.lastError { errorBubble(err) }
                     }
+                    .padding(AF.Space.m)
                 }
-                .padding(AF.Space.m)
-            }
-            .onChange(of: ai.messages.count) { _, _ in
-                if let last = ai.messages.last {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
+                .onChange(of: ai.messages.count) { _, _ in
+                    if let last = ai.messages.last {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
                     }
                 }
             }
         }
     }
+
+    // MARK: - Empty state
 
     @ViewBuilder private var emptyState: some View {
-        VStack(alignment: .leading, spacing: AF.Space.m) {
-            Text("Suggestions")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .textCase(.uppercase)
+        VStack(spacing: AF.Space.l) {
+            Spacer()
 
-            ForEach(AIController.QuickAction.allCases) { a in
-                Button {
-                    ai.run(a, api: api)
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: a.icon)
-                            .frame(width: 22)
-                            .foregroundStyle(AF.Palette.tint(.purple))
-                        Text(a.title)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: "arrow.up.right.circle")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                            .fill(Color.white.opacity(0.04))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                            .strokeBorder(.white.opacity(0.06), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(ai.isLoading)
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [AF.Palette.tint(.purple).opacity(0.30),
+                                 AF.Palette.tint(.blue).opacity(0.18)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 68, height: 68)
+                    .blur(radius: 12)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(aiGradient)
             }
+
+            VStack(spacing: 6) {
+                Text("Ask me anything")
+                    .font(.headline)
+                Text(caseID != nil
+                     ? "I have context on this case — its documents, notes, and workflow state."
+                     : "Select a case to give me context, or ask a general question.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 260)
+            }
+
+            FlowLayout(spacing: 8) {
+                ForEach(AIController.QuickAction.allCases) { a in
+                    Button { ai.run(a, api: api) } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: a.icon)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(aiGradient)
+                            Text(a.title)
+                                .font(.callout)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Capsule().fill(Color.white.opacity(0.07)))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(ai.isLoading)
+                }
+            }
+
+            Spacer()
         }
+        .padding(.horizontal, AF.Space.m)
     }
+
+    // MARK: - Message bubble
 
     @ViewBuilder private func messageBubble(_ m: APIClient.ChatMessage) -> some View {
         let isUser = m.role == "user"
-        HStack {
-            if isUser { Spacer(minLength: 24) }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(m.role.capitalized)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .textCase(.uppercase)
-                Text(m.content)
-                    .font(.callout)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(alignment: .bottom, spacing: 8) {
+            if isUser { Spacer(minLength: 44) }
+            if !isUser {
+                Circle()
+                    .fill(aiGradient)
+                    .frame(width: 22, height: 22)
+                    .overlay(
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                    )
             }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                    .fill(isUser ? AF.Palette.tint(.blue).opacity(0.18) : Color.white.opacity(0.05))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                    .strokeBorder(.white.opacity(0.06), lineWidth: 1)
-            )
-            if !isUser { Spacer(minLength: 24) }
+            Text(m.content)
+                .font(.callout)
+                .textSelection(.enabled)
+                .multilineTextAlignment(isUser ? .trailing : .leading)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(isUser
+                            ? LinearGradient(
+                                colors: [AF.Palette.tint(.blue).opacity(0.40),
+                                         AF.Palette.tint(.purple).opacity(0.30)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                            : LinearGradient(
+                                colors: [Color.white.opacity(0.12), Color.white.opacity(0.07)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(
+                            isUser ? AF.Palette.tint(.blue).opacity(0.35) : Color.white.opacity(0.12),
+                            lineWidth: 1)
+                )
+            if !isUser { Spacer(minLength: 44) }
         }
     }
 
+    // MARK: - Thinking bubble
+
+    @ViewBuilder private var thinkingBubble: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Circle()
+                .fill(aiGradient)
+                .frame(width: 22, height: 22)
+                .overlay(
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                )
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(AF.Palette.tint(.purple))
+                Text("Thinking…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+            Spacer(minLength: 44)
+        }
+    }
+
+    // MARK: - Error bubble
+
+    @ViewBuilder private func errorBubble(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.red.opacity(0.85))
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.red.opacity(0.85))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
+                .fill(Color.red.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
+                .strokeBorder(Color.red.opacity(0.20), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Citation strip
+
     @ViewBuilder private func citationStrip(_ sources: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Sources")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Sources used")
+                .font(.caption2.weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(.white.opacity(0.40))
                 .textCase(.uppercase)
+                .padding(.leading, 2)
             FlowLayout(spacing: 6) {
                 ForEach(Array(sources.enumerated()), id: \.offset) { _, name in
                     Button {
                         router.open(.document(filename: name, caseID: caseID))
                     } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: "doc.text")
+                            Image(systemName: "doc.text.fill")
                             Text(name).lineLimit(1)
                         }
                         .font(.caption)
                         .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Capsule().fill(AF.Palette.tint(.blue).opacity(0.18)))
-                        .overlay(Capsule().strokeBorder(AF.Palette.tint(.blue).opacity(0.4), lineWidth: 1))
+                        .background(Capsule().fill(AF.Palette.tint(.blue).opacity(0.15)))
+                        .overlay(Capsule().strokeBorder(AF.Palette.tint(.blue).opacity(0.40), lineWidth: 1))
+                        .foregroundStyle(AF.Palette.tint(.blue))
                     }
                     .buttonStyle(.plain)
                 }
@@ -254,28 +330,30 @@ struct AIInspector: View {
     // MARK: - Composer
 
     @ViewBuilder private var composer: some View {
-        VStack(spacing: 6) {
-            Divider().opacity(0.2)
+        VStack(spacing: 0) {
+            Divider().opacity(0.15)
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Ask about this case…", text: $input, axis: .vertical)
+                TextField("Message…", text: $input, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
                     .focused($focused)
-                    .padding(10)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                     .background(
-                        RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                            .fill(Color.black.opacity(0.25))
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(Color.white.opacity(focused ? 0.09 : 0.06))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                            .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(
+                                focused ? AF.Palette.tint(.purple).opacity(0.50) : Color.white.opacity(0.10),
+                                lineWidth: 1)
                     )
-                    .onSubmit { submit() }
-                Button {
-                    submit()
-                } label: {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                    .animation(.easeOut(duration: 0.15), value: focused)
+
+                Button { submit() } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 13, weight: .bold))
                         .padding(10)
                 }
                 .buttonStyle(.afPrimary)
@@ -283,8 +361,7 @@ struct AIInspector: View {
                 .disabled(input.trimmingCharacters(in: .whitespaces).isEmpty || ai.isLoading)
             }
             .padding(.horizontal, AF.Space.m)
-            .padding(.bottom, AF.Space.m)
-            .padding(.top, 4)
+            .padding(.vertical, AF.Space.m)
         }
     }
 
@@ -306,9 +383,7 @@ struct FlowLayout: Layout {
         var x: CGFloat = 0, y: CGFloat = 0, lineH: CGFloat = 0
         for v in subviews {
             let s = v.sizeThatFits(.unspecified)
-            if x + s.width > maxW {
-                x = 0; y += lineH + spacing; lineH = 0
-            }
+            if x + s.width > maxW { x = 0; y += lineH + spacing; lineH = 0 }
             x += s.width + spacing
             lineH = max(lineH, s.height)
         }
@@ -319,9 +394,7 @@ struct FlowLayout: Layout {
         var x: CGFloat = bounds.minX, y: CGFloat = bounds.minY, lineH: CGFloat = 0
         for v in subviews {
             let s = v.sizeThatFits(.unspecified)
-            if x + s.width > bounds.maxX {
-                x = bounds.minX; y += lineH + spacing; lineH = 0
-            }
+            if x + s.width > bounds.maxX { x = bounds.minX; y += lineH + spacing; lineH = 0 }
             v.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
             x += s.width + spacing
             lineH = max(lineH, s.height)

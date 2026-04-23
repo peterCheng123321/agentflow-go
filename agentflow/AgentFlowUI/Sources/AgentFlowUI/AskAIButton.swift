@@ -14,7 +14,7 @@ struct AskAIButton: View {
                 ForEach(AIController.QuickAction.allCases) { a in
                     Button {
                         ai.bind(toCase: caseID)
-                        router.inspectorOpen = true
+                        if let id = caseID { router.focusResearch(forCase: id) }
                         ai.run(a, api: api)
                     } label: {
                         Label(a.title, systemImage: a.icon)
@@ -41,7 +41,7 @@ struct AskAIButton: View {
             }
         } primaryAction: {
             ai.bind(toCase: caseID)
-            router.inspectorOpen = true
+            if let id = caseID { router.focusResearch(forCase: id) }
         }
         .menuStyle(.borderlessButton)
         .buttonStyle(.afPrimary)

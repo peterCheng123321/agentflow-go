@@ -4,6 +4,7 @@ dist/
 # Binaries
 agentflow-go
 agentflow-go-new
+agentflow-serve
 *.exe
 *.exe~
 *.dll

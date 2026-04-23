@@ -33,6 +33,7 @@ final class BackendManager: ObservableObject {
         let candidates: [String] = [
             Bundle.main.bundlePath + "/Contents/MacOS/agentflow-serve",
             ProcessInfo.processInfo.environment["AGENTFLOW_SERVE_PATH"] ?? "",
+            home + "/Downloads/agentflow/agentflow-go/agentflow-serve",
             home + "/Downloads/agentflow/agentflow-serve",
             "/tmp/agentflow-serve",
             "/usr/local/bin/agentflow-serve"

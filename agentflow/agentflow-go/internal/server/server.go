@@ -109,7 +109,10 @@ func New(cfg *config.Config) *Server {
 	})
 	s.workerPool = wp
 
-	s.workflow.CreateCase("ClientX", "Commercial Lease Dispute", "Demo", "")
+	// Only seed the demo case when the store is empty (prevents duplicates on restart)
+	if existing := s.workflow.ListCases(); len(existing) == 0 {
+		s.workflow.CreateCase("ClientX", "Commercial Lease Dispute", "Demo", "")
+	}
 
 	s.setupRoutes()
 	return s
@@ -175,6 +178,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/v1/device", s.handleDeviceStatus)
 	s.mux.HandleFunc("/api/models", s.handleListModels)
 	s.mux.HandleFunc("/api/models/benchmark", s.handleBenchmarkModel)
+	s.mux.HandleFunc("/v1/chat", s.handleChat)
 
 	// Prefix handlers LAST
 	s.mux.HandleFunc("/v1/jobs/", s.handleJobs)
@@ -345,11 +349,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Printf("WebSocket connected, total: %d", connCount)
 
 	cases := s.workflow.ListCases()
+	s.jobsMu.RLock()
+	initJobs := make([]model.Job, 0, len(s.jobs))
+	for _, j := range s.jobs {
+		initJobs = append(initJobs, *j)
+	}
+	s.jobsMu.RUnlock()
 	data := map[string]interface{}{
 		"type":       "status_update",
 		"cases":      cases,
 		"case_count": len(cases),
 		"rag":        s.rag.GetSummary(),
+		"jobs":       initJobs,
 	}
 	if err := s.wsWriteJSON(conn, data); err != nil {
 		log.Printf("WebSocket initial write: %v", err)
@@ -467,13 +478,13 @@ func (s *Server) handleRAGSummary(w http.ResponseWriter, r *http.Request) {
 // resolveFrontendDir finds the frontend directory whether running from source or .app bundle.
 func resolveFrontendDir() string {
 	if exe, err := os.Executable(); err == nil {
-		// macOS .app bundle: binary is at Contents/MacOS/agentflow, frontend at Contents/Resources/frontend
+		// macOS .app bundle: server binary (e.g. agentflow-serve) under Contents/MacOS or Resources; static UI in Contents/Resources/frontend
 		bundleFrontend := filepath.Join(filepath.Dir(exe), "..", "Resources", "frontend")
 		if fi, err := os.Stat(bundleFrontend); err == nil && fi.IsDir() {
 			return bundleFrontend
 		}
 	}
-	for _, dir := range []string{"frontend-v2", "frontend"} {
+	for _, dir := range []string{"frontend"} {
 		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 			return dir
 		}

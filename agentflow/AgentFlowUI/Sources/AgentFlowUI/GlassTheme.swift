@@ -1,37 +1,96 @@
 import SwiftUI
 
-// MARK: - Theme
+// MARK: - Design tokens
+//
+// Centralised tokens for spacing, radius, and colour. Views should consume
+// these rather than hard-coding values — this keeps the app aligned with the
+// macOS 26 HIG 8pt grid and lets the theme evolve in one place.
 
 enum AF {
-    enum Radius {
-        static let s: CGFloat = 8
-        static let m: CGFloat = 12
-        static let l: CGFloat = 18
-        static let xl: CGFloat = 28
-    }
+
+    // 8pt grid spacing scale (plus 4pt for very tight gaps).
     enum Space {
-        static let xs: CGFloat = 6
-        static let s: CGFloat = 10
-        static let m: CGFloat = 16
-        static let l: CGFloat = 24
-        static let xl: CGFloat = 36
+        static let xxs: CGFloat = 4
+        static let xs:  CGFloat = 8
+        static let s:   CGFloat = 12
+        static let m:   CGFloat = 16
+        static let l:   CGFloat = 24
+        static let xl:  CGFloat = 32
+        static let xxl: CGFloat = 48
     }
+
+    // Corner radii. Matches Apple's own concentric-corner guidance.
+    enum Radius {
+        static let s:  CGFloat = 6
+        static let m:  CGFloat = 10
+        static let l:  CGFloat = 14
+        static let xl: CGFloat = 20
+    }
+
+    // System-semantic colours. No hard-coded RGB for chrome surfaces —
+    // everything here tracks light/dark mode and accessibility contrast.
     enum Palette {
-        static func tint(_ a: AFAccent) -> Color {
-            switch a {
-            case .neutral: return .secondary
-            case .blue:    return Color(red: 0.25, green: 0.55, blue: 1.0)
-            case .purple:  return Color(red: 0.62, green: 0.35, blue: 0.98)
-            case .amber:   return Color(red: 1.0, green: 0.70, blue: 0.22)
-            case .green:   return Color(red: 0.20, green: 0.80, blue: 0.55)
-            case .gray:    return Color.gray
+        static let accent         = Color.accentColor
+        static let background     = Color(nsColor: .windowBackgroundColor)
+        static let surface        = Color(nsColor: .controlBackgroundColor)
+        static let separator      = Color(nsColor: .separatorColor)
+        static let textPrimary    = Color(nsColor: .labelColor)
+        static let textSecondary  = Color(nsColor: .secondaryLabelColor)
+
+        /// Semantic colour for a workflow state. Delegates to `tint(_:)` via
+        /// the state's accent mapping so there's a single source of truth
+        /// for workflow colour decisions.
+        static func state(_ state: WorkflowState) -> Color {
+            tint(state.accent)
+        }
+
+        /// Legacy accent-token lookup kept so callers outside this file
+        /// (SidebarView, CaseDetailView, etc.) keep compiling. New code
+        /// should prefer `state(_:)` or the semantic tokens above.
+        static func tint(_ accent: AFAccent) -> Color {
+            switch accent {
+            case .neutral: return Color(nsColor: .secondaryLabelColor)
+            case .blue:    return Color(nsColor: .systemBlue)
+            case .purple:  return Color(nsColor: .systemPurple)
+            case .amber:   return Color(nsColor: .systemOrange)
+            case .green:   return Color(nsColor: .systemGreen)
+            case .gray:    return Color(nsColor: .systemGray)
             }
         }
     }
 }
 
-// MARK: - Glass card
+// MARK: - Liquid Glass helpers
+//
+// Thin wrappers around the native `.glassEffect()` modifier so every surface
+// picks up the same radius + tint treatment. Do NOT reintroduce hand-rolled
+// `.ultraThinMaterial + overlay + shadow` stacks — that's what these replace.
 
+extension View {
+    /// Wraps content in a Liquid Glass card: padding is the caller's
+    /// responsibility, the modifier only applies the surface treatment.
+    func afGlassCard(radius: CGFloat = AF.Radius.l) -> some View {
+        self.glassEffect(
+            .regular,
+            in: RoundedRectangle(cornerRadius: radius, style: .continuous)
+        )
+    }
+
+    /// Subtler Liquid Glass panel for inline/secondary surfaces (toolbars,
+    /// chips, side rails). Uses the smaller `.m` radius by default.
+    func afGlassPanel() -> some View {
+        self.glassEffect(
+            .regular,
+            in: RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
+        )
+    }
+}
+
+// MARK: - Glass card (legacy container)
+
+/// Kept for source compatibility — existing call sites use `GlassCard { ... }`.
+/// Internally routes through `afGlassCard` so the visual treatment matches
+/// the rest of the system.
 struct GlassCard<Content: View>: View {
     var padding: CGFloat = AF.Space.m
     var radius: CGFloat = AF.Radius.l
@@ -40,32 +99,27 @@ struct GlassCard<Content: View>: View {
     var body: some View {
         content()
             .padding(padding)
-            .background(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: 6)
+            .afGlassCard(radius: radius)
     }
 }
 
 // MARK: - Section header
 
+/// Sentence-case section label. No ALL CAPS, no letter-spacing — just a
+/// quiet secondary caption, per HIG.
 struct SectionHeader: View {
     let title: String
     var subtitle: String? = nil
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: AF.Space.xxs) {
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(0.8)
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-            if let s = subtitle {
-                Text(s).font(.callout).foregroundStyle(.secondary)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -75,91 +129,89 @@ struct SectionHeader: View {
 
 struct StatePill: View {
     let state: String
+
     var body: some View {
         let ws = WorkflowState(rawValue: state)
-        let tint = AF.Palette.tint(ws?.accent ?? .neutral)
+        let tint = ws.map(AF.Palette.state) ?? AF.Palette.textSecondary
         Text(ws?.pretty ?? state)
             .font(.caption.weight(.semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                Capsule().fill(tint.opacity(0.18))
-            )
-            .overlay(
-                Capsule().strokeBorder(tint.opacity(0.45), lineWidth: 0.8)
-            )
+            .padding(.horizontal, AF.Space.s)
+            .padding(.vertical, AF.Space.xxs)
             .foregroundStyle(tint)
+            .background(
+                Capsule(style: .continuous).fill(tint.opacity(0.15))
+            )
     }
 }
 
-// MARK: - Primary / secondary button style
+// MARK: - Button styles
 
+/// Prominent call-to-action filled with the system accent colour.
 struct AFPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.callout.weight(.semibold))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
+            .padding(.horizontal, AF.Space.m)
+            .padding(.vertical, AF.Space.xs)
+            .foregroundStyle(Color.white)
             .background(
                 RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                    .fill(LinearGradient(
-                        colors: [Color.accentColor, Color.accentColor.opacity(0.85)],
-                        startPoint: .top, endPoint: .bottom))
+                    .fill(Color.accentColor)
             )
-            .foregroundStyle(.white)
-            .opacity(configuration.isPressed ? 0.75 : 1)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .shadow(color: Color.accentColor.opacity(0.35), radius: 10, y: 3)
+            .opacity(configuration.isPressed ? 0.8 : 1)
     }
 }
 
+/// Secondary action rendered on a Liquid Glass panel.
 struct AFGhostButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.callout.weight(.medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                    .strokeBorder(.white.opacity(0.08), lineWidth: 1)
-            )
+            .padding(.horizontal, AF.Space.s)
+            .padding(.vertical, AF.Space.xs)
+            .foregroundStyle(.primary)
+            .afGlassPanel()
             .opacity(configuration.isPressed ? 0.75 : 1)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
     }
 }
 
-extension ButtonStyle where Self == AFPrimaryButtonStyle { static var afPrimary: AFPrimaryButtonStyle { .init() } }
-extension ButtonStyle where Self == AFGhostButtonStyle { static var afGhost: AFGhostButtonStyle { .init() } }
+extension ButtonStyle where Self == AFPrimaryButtonStyle {
+    static var afPrimary: AFPrimaryButtonStyle { .init() }
+}
+extension ButtonStyle where Self == AFGhostButtonStyle {
+    static var afGhost: AFGhostButtonStyle { .init() }
+}
 
 // MARK: - Ambient background
 
+/// Window background. Uses the system window colour so light/dark mode,
+/// increased contrast, and tinted appearances all behave correctly.
 struct AmbientBackground: View {
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [
-                Color(red: 0.06, green: 0.07, blue: 0.12),
-                Color(red: 0.10, green: 0.10, blue: 0.18)
-            ], startPoint: .top, endPoint: .bottom)
+        AF.Palette.background
             .ignoresSafeArea()
+    }
+}
 
-            // Soft orbs
-            GeometryReader { geo in
-                Circle()
-                    .fill(Color(red: 0.30, green: 0.45, blue: 1.0).opacity(0.22))
-                    .frame(width: geo.size.width * 0.6, height: geo.size.width * 0.6)
-                    .blur(radius: 110)
-                    .offset(x: -geo.size.width * 0.15, y: -geo.size.height * 0.15)
-                Circle()
-                    .fill(Color(red: 0.75, green: 0.35, blue: 1.0).opacity(0.20))
-                    .frame(width: geo.size.width * 0.55, height: geo.size.width * 0.55)
-                    .blur(radius: 120)
-                    .offset(x: geo.size.width * 0.55, y: geo.size.height * 0.50)
+// MARK: - Meta item
+
+struct MetaItem: View {
+    let icon: String
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: AF.Space.xs) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.callout)
             }
-            .ignoresSafeArea()
         }
     }
 }
@@ -170,17 +222,15 @@ struct EmptyStateView: View {
     let icon: String
     let title: String
     let subtitle: String
+
     var body: some View {
-        VStack(spacing: AF.Space.m) {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .frame(width: 88, height: 88)
-                Image(systemName: icon)
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundStyle(.secondary)
-            }
-            Text(title).font(.title3.weight(.semibold))
+        VStack(spacing: AF.Space.s) {
+            Image(systemName: icon)
+                .font(.system(size: 40, weight: .regular))
+                .foregroundStyle(.secondary)
+                .padding(.bottom, AF.Space.xs)
+            Text(title)
+                .font(.headline)
             Text(subtitle)
                 .font(.callout)
                 .multilineTextAlignment(.center)

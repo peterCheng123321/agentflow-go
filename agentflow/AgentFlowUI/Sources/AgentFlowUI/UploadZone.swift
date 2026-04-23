@@ -25,34 +25,37 @@ struct UploadZone: View {
             Button {
                 pickFile()
             } label: {
-                VStack(spacing: 10) {
-                    ZStack {
-                        Circle().fill(.ultraThinMaterial).frame(width: 52, height: 52)
-                        Image(systemName: "arrow.up.doc.fill")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(AF.Palette.tint(.blue))
-                    }
-                    VStack(spacing: 2) {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.up.doc.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(hovering ? AF.Palette.tint(.blue) : .secondary)
+                    VStack(alignment: .leading, spacing: 1) {
                         Text("Drop files or click to upload")
-                            .font(.callout.weight(.semibold))
-                        Text("PDF, images, text, DOCX, ZIP — processed automatically")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(hovering ? .primary : .secondary)
+                        Text("PDF, images, text, DOCX, ZIP")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
+                    Spacer()
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(hovering ? AF.Palette.tint(.blue) : .secondary)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, AF.Space.l)
                 .padding(.horizontal, AF.Space.m)
+                .padding(.vertical, AF.Space.s)
                 .background(
-                    RoundedRectangle(cornerRadius: AF.Radius.l, style: .continuous)
-                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
+                        .fill(hovering ? AF.Palette.tint(.blue).opacity(0.08) : Color.black.opacity(0.15))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: AF.Radius.l, style: .continuous)
+                    RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
                         .strokeBorder(
-                            hovering ? AF.Palette.tint(.blue) : .white.opacity(0.08),
-                            style: StrokeStyle(lineWidth: hovering ? 2 : 1, dash: hovering ? [] : [4, 4])
+                            hovering ? AF.Palette.tint(.blue).opacity(0.60) : Color.white.opacity(0.10),
+                            style: StrokeStyle(lineWidth: 1, dash: hovering ? [] : [5, 4])
                         )
                 )
+                .animation(.easeOut(duration: 0.15), value: hovering)
             }
             .buttonStyle(.plain)
             .onDrop(of: [.fileURL], isTargeted: $hovering) { providers in
@@ -146,7 +149,7 @@ struct UploadZone: View {
 
     private func upload(url: URL) {
         let name = url.lastPathComponent
-        var job = UploadJob(filename: name, progress: 0.0, status: .uploading)
+        let job = UploadJob(filename: name, progress: 0.0, status: .uploading)
         jobs.append(job)
         let jobID = job.id
 

@@ -79,7 +79,7 @@ enum WorkflowState: String, CaseIterable {
 
     var accent: AFAccent {
         switch self {
-        case .clientCapture, .initialContact: return .neutral
+        case .clientCapture, .initialContact: return .blue
         case .caseEvaluation, .feeCollection, .caseIntake: return .blue
         case .evidenceGathering, .draftPreparation: return .purple
         case .clientReview: return .amber

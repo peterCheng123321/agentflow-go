@@ -21,95 +21,78 @@ struct NewCaseSheet: View {
         "Other"
     ]
 
+    private var canCreate: Bool {
+        !busy && !clientName.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: AF.Space.m) {
-            HStack {
-                Text("New case").font(.title2.weight(.semibold))
-                Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+        NavigationStack {
+            Form {
+                Section("Client") {
+                    TextField("Client name", text: $clientName, prompt: Text("e.g. Acme Corp."))
+                    Picker("Matter type", selection: $matterType) {
+                        ForEach(matterOptions, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.menu)
                 }
-                .buttonStyle(.plain)
-            }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("CLIENT NAME").font(.caption2).foregroundStyle(.secondary).tracking(0.6)
-                TextField("e.g. Acme Corp.", text: $clientName)
-                    .textFieldStyle(.plain)
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                            .fill(Color.black.opacity(0.22))
-                    )
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("MATTER TYPE").font(.caption2).foregroundStyle(.secondary).tracking(0.6)
-                Picker("", selection: $matterType) {
-                    ForEach(matterOptions, id: \.self) { Text($0).tag($0) }
+                Section {
+                    TextEditor(text: $initialMsg)
+                        .frame(minHeight: 120)
+                        .overlay(alignment: .topLeading) {
+                            if initialMsg.isEmpty {
+                                Text("What's the matter? A few sentences help the AI draft an intake evaluation.")
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 8)
+                                    .padding(.leading, 4)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                } header: {
+                    Text("Initial message")
+                } footer: {
+                    Text("Optional. The AI uses this to pre-fill a triage evaluation.")
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .padding(6)
-                .background(
-                    RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                        .fill(Color.black.opacity(0.22))
-                )
-            }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("INITIAL MESSAGE").font(.caption2).foregroundStyle(.secondary).tracking(0.6)
-                TextEditor(text: $initialMsg)
-                    .font(.callout)
-                    .frame(minHeight: 90)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(
-                        RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                            .fill(Color.black.opacity(0.22))
-                    )
-            }
-
-            if let e = errorMsg {
-                Text(e).foregroundStyle(.red).font(.caption)
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(.afGhost)
-                    .disabled(busy)
-                Button {
-                    Task { await create() }
-                } label: {
-                    if busy {
-                        HStack { ProgressView().controlSize(.small); Text("Creating…") }
-                    } else {
-                        Text("Create case")
+                if let e = errorMsg {
+                    Section {
+                        Label(e, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .font(.callout)
                     }
                 }
-                .buttonStyle(.afPrimary)
-                .disabled(busy || clientName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .formStyle(.grouped)
+            .navigationTitle("New case")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(busy)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await create() }
+                    } label: {
+                        if busy {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Creating…")
+                            }
+                        } else {
+                            Text("Create")
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canCreate)
+                }
             }
         }
-        .padding(AF.Space.l)
-        .frame(width: 460)
-        .background(
-            RoundedRectangle(cornerRadius: AF.Radius.xl, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AF.Radius.xl, style: .continuous)
-                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
-        )
+        .frame(minWidth: 480, minHeight: 440)
     }
 
     private func create() async {
         busy = true; defer { busy = false }
+        errorMsg = nil
         do {
             try await api.createCase(
                 clientName: clientName.trimmingCharacters(in: .whitespaces),

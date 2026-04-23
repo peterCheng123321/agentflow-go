@@ -12,6 +12,9 @@ import SwiftUI
 @MainActor
 final class AppRouter: ObservableObject {
     @Published var sheet: Sheet?
+    /// When set, the case hub for this `case_id` selects the Research tab (Ask AI / quick actions).
+    @Published var pendingCaseResearchFocus: String?
+
     @Published var inspectorOpen: Bool = false
 
     enum Sheet: Identifiable, Hashable {
@@ -32,5 +35,10 @@ final class AppRouter: ObservableObject {
 
     func open(_ s: Sheet) { sheet = s }
     func close() { sheet = nil }
+
+    func focusResearch(forCase caseID: String) {
+        pendingCaseResearchFocus = caseID
+    }
+
     func toggleInspector() { inspectorOpen.toggle() }
 }
