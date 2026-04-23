@@ -11,87 +11,76 @@ struct SettingsSheet: View {
     @State private var message: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AF.Space.m) {
-            HStack {
-                Text("Settings").font(.title2.weight(.semibold))
-                Spacer()
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3).foregroundStyle(.secondary)
-                }.buttonStyle(.plain)
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: AF.Space.s) {
+                        Group {
+                            if showKey {
+                                TextField("sk-…", text: $apiKey)
+                            } else {
+                                SecureField("sk-…", text: $apiKey)
+                            }
+                        }
+                        .textFieldStyle(.roundedBorder)
+
+                        Button {
+                            showKey.toggle()
+                        } label: {
+                            Image(systemName: showKey ? "eye.slash" : "eye")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(showKey ? "Hide key" : "Show key")
+                    }
+                    .labelsHidden()
+                } header: {
+                    Text("DashScope API key")
+                } footer: {
+                    Text("Stored locally in ~/Library/Application Support/AgentFlow/config.env (owner-only).")
+                }
+
+                Section {
+                    TextField("qwen-max", text: $model)
+                        .textFieldStyle(.roundedBorder)
+                        .labelsHidden()
+                } header: {
+                    Text("Default model")
+                } footer: {
+                    Text("The model used for new runs. Can be overridden per case from the AI inspector.")
+                }
+
+                if let m = message {
+                    Section {
+                        Text(m).font(.callout).foregroundStyle(.secondary)
+                    }
+                }
             }
-
-            SectionHeader(title: "AI Provider",
-                          subtitle: "Your DashScope API key is stored locally in \n~/Library/Application Support/AgentFlow/config.env (owner-only)")
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("DASHSCOPE API KEY").font(.caption2).foregroundStyle(.secondary).tracking(0.6)
-                HStack(spacing: 8) {
-                    Group {
-                        if showKey {
-                            TextField("sk-…", text: $apiKey)
+            .formStyle(.grouped)
+            .navigationTitle("Settings")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(busy)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        save()
+                    } label: {
+                        if busy {
+                            HStack(spacing: AF.Space.xs) {
+                                ProgressView().controlSize(.small)
+                                Text("Restarting…")
+                            }
                         } else {
-                            SecureField("sk-…", text: $apiKey)
+                            Text("Save")
                         }
                     }
-                    .textFieldStyle(.plain)
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                            .fill(Color.black.opacity(0.22))
-                    )
-                    Button {
-                        showKey.toggle()
-                    } label: {
-                        Image(systemName: showKey ? "eye.slash" : "eye")
-                    }
-                    .buttonStyle(.afGhost)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(busy || apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("MODEL").font(.caption2).foregroundStyle(.secondary).tracking(0.6)
-                TextField("qwen-max", text: $model)
-                    .textFieldStyle(.plain)
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                            .fill(Color.black.opacity(0.22))
-                    )
-            }
-
-            if let m = message {
-                Text(m).font(.caption).foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(.afGhost)
-                    .disabled(busy)
-                Button {
-                    save()
-                } label: {
-                    if busy {
-                        HStack { ProgressView().controlSize(.small); Text("Restarting backend…") }
-                    } else {
-                        Text("Save & restart backend")
-                    }
-                }
-                .buttonStyle(.afPrimary)
-                .disabled(busy || apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .padding(AF.Space.l)
-        .frame(width: 520)
-        .background(
-            RoundedRectangle(cornerRadius: AF.Radius.xl, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AF.Radius.xl, style: .continuous)
-                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
-        )
+        .frame(minWidth: 520, minHeight: 360)
         .onAppear {
             let existing = BackendManager.readConfigEnv()
             apiKey = existing["AGENTFLOW_DASHSCOPE_API_KEY"] ?? ""
