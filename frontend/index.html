@@ -329,6 +329,12 @@
     <script>
         const API = window.location.origin + "/v1";
 
+        // Tunables — centralized so they're easy to find/tweak.
+        const TOAST_DISMISS_MS = 4000;
+        const WS_BACKOFF_MIN_MS = 1000;
+        const WS_BACKOFF_MAX_MS = 30000;
+        const HTTP_POLL_INTERVAL_MS = 4000;
+
         function escapeHtmlAttr(s) {
             return String(s)
                 .replace(/&/g, "&amp;")
@@ -507,7 +513,7 @@
                 el.className = `p-4 rounded-xl ${colors[type]} text-white text-xs font-bold shadow-xl animate-in slide-in-from-right-4 duration-300`;
                 el.textContent = msg;
                 document.getElementById("toast-container").appendChild(el);
-                setTimeout(() => el.remove(), 4000);
+                setTimeout(() => el.remove(), TOAST_DISMISS_MS);
             },
 
             render() {
@@ -1032,8 +1038,8 @@
             }
         };
 
-        let _wsBackoffMs = 1000;
-        const _wsBackoffMax = 30000;
+        let _wsBackoffMs = WS_BACKOFF_MIN_MS;
+        const _wsBackoffMax = WS_BACKOFF_MAX_MS;
         let _wsConnected = false;
 
         async function pollStatusIfWSDead() {
@@ -1049,7 +1055,7 @@
             } catch (e) { console.warn("pollStatusIfWSDead failed", e); }
         }
 
-        setInterval(pollStatusIfWSDead, 4000);
+        setInterval(pollStatusIfWSDead, HTTP_POLL_INTERVAL_MS);
         pollStatusIfWSDead();
 
         document.getElementById("case-list").addEventListener("click", (e) => {
@@ -1081,7 +1087,7 @@
             const ws = new WebSocket((location.protocol === "https:" ? "wss:" : "ws:") + "//" + location.host + "/ws");
             ws.onopen = () => {
                 _wsConnected = true;
-                _wsBackoffMs = 1000;
+                _wsBackoffMs = WS_BACKOFF_MIN_MS;
                 document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-emerald-500 pulse-dot";
                 document.getElementById("conn-text").textContent = "Connected";
                 Actions.refreshAll();
