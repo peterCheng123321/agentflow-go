@@ -26,6 +26,36 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// checkWebSocketOrigin accepts same-host and loopback origins by default,
+// and allows additional origins via the AGENTFLOW_ALLOW_ORIGINS env var
+// (comma-separated list of full origins, e.g. "https://app.example.com").
+// Requests with no Origin header (non-browser clients like curl) are allowed.
+func checkWebSocketOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "127.0.0.1" || host == "::1" || host == "localhost" {
+		return true
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+	if allow := os.Getenv("AGENTFLOW_ALLOW_ORIGINS"); allow != "" {
+		for _, a := range strings.Split(allow, ",") {
+			if strings.EqualFold(strings.TrimSpace(a), origin) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type Server struct {
 	cfg        *config.Config
 	llm        *llm.Provider
@@ -58,9 +88,7 @@ func New(cfg *config.Config) *Server {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			CheckOrigin:     checkWebSocketOrigin,
 		},
 	}
 
