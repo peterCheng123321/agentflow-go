@@ -134,10 +134,9 @@ final class APIClient: ObservableObject {
         req.httpMethod = "POST"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-        let (body, mimeType) = try multipartBody(boundary: boundary, fileURL: fileURL, caseID: caseID)
+        let body = try multipartBody(boundary: boundary, fileURL: fileURL, caseID: caseID)
         req.httpBody = body
         req.setValue("\(body.count)", forHTTPHeaderField: "Content-Length")
-        _ = mimeType // retained for potential use
 
         progress(0.2)
         let (data, resp) = try await URLSession.shared.data(for: req)
@@ -146,7 +145,7 @@ final class APIClient: ObservableObject {
         return try decoder.decode(UploadResponse.self, from: data)
     }
 
-    private func multipartBody(boundary: String, fileURL: URL, caseID: String?) throws -> (Data, String) {
+    private func multipartBody(boundary: String, fileURL: URL, caseID: String?) throws -> Data {
         var body = Data()
         let cr = "\r\n"
         let filename = fileURL.lastPathComponent
@@ -163,7 +162,7 @@ final class APIClient: ObservableObject {
         body.append(try Data(contentsOf: fileURL))
         body.append(cr.data(using: .utf8)!)
         body.append("--\(boundary)--\(cr)".data(using: .utf8)!)
-        return (body, mime)
+        return body
     }
 
     private func mimeFor(url: URL) -> String {
@@ -195,12 +194,6 @@ final class APIClient: ObservableObject {
         return try await getData("v1/documents/\(enc)/view")
     }
 
-    /// Build a file-like URL for the view endpoint.
-    func documentViewURL(filename: String) -> URL {
-        let enc = filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filename
-        return base.appendingPathComponent("v1/documents/\(enc)/view")
-    }
-
     // MARK: - Jobs
 
     struct JobStatus: Decodable {
@@ -228,16 +221,6 @@ final class APIClient: ObservableObject {
         throw APIError.http(status: 504, message: "Job \(id) did not finish in time")
     }
 
-    // MARK: - RAG
-
-    struct SearchHit: Decodable, Identifiable {
-        let filename: String
-        let chunk: String
-        let score: Double
-        let match_mode: String?
-        var id: String { filename + String(score) }
-    }
-
     // MARK: - LLM / Chat
 
     struct LLMModel: Decodable, Identifiable, Hashable {
@@ -250,7 +233,6 @@ final class APIClient: ObservableObject {
 
     struct ModelsResponse: Decodable {
         let models: [LLMModel]
-        let backend: String?
         let current: String?
     }
 
@@ -276,7 +258,6 @@ final class APIClient: ObservableObject {
     struct ChatResponse: Decodable {
         let reply: String
         let sources: [String]?
-        let model: String?
     }
 
     /// Send chat turn to /v1/chat. Returns assistant reply with optional RAG sources.
@@ -298,18 +279,6 @@ final class APIClient: ObservableObject {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try check(resp, data: data)
         return try decoder.decode(ChatResponse.self, from: data)
-    }
-
-    func ragSearch(query: String, k: Int = 5) async throws -> [SearchHit] {
-        struct Req: Codable { let query: String; let k: Int }
-        struct Resp: Decodable { let results: [SearchHit] }
-        var req = URLRequest(url: base.appendingPathComponent("v1/rag/search"))
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONEncoder().encode(Req(query: query, k: k))
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        try check(resp, data: data)
-        return try decoder.decode(Resp.self, from: data).results
     }
 }
 
