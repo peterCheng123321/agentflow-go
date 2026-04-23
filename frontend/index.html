@@ -467,11 +467,11 @@
 
             update(data) {
                 if (!data || typeof data !== "object") return;
-                if (data.cases) this.cases = data.cases;
-                if (data.jobs) {
+                if (Array.isArray(data.cases)) this.cases = data.cases;
+                if (Array.isArray(data.jobs)) {
                     const newJobs = {};
                     data.jobs.forEach(j => {
-                        newJobs[j.id] = j;
+                        if (j && j.id) newJobs[j.id] = j;
                     });
                     this.jobs = newJobs;
                 }
@@ -485,7 +485,12 @@
             async fetchFullCase(id) {
                 try {
                     const r = await fetch(`${API}/cases/${id}`);
-                    this.selectedCase = await r.json();
+                    const d = await r.json().catch(() => null);
+                    if (!r.ok || !d || typeof d !== "object") {
+                        UI.toast("Failed to fetch case", "error");
+                        return;
+                    }
+                    this.selectedCase = d;
                     UI.render();
                 } catch (e) { UI.toast("Failed to fetch case", "error"); }
             }
@@ -882,12 +887,13 @@
                         method: "POST",
                         body: JSON.stringify({ query: q, k: 5 })
                     });
-                    const d = await r.json();
-                    if (!d.results?.length) {
+                    const d = await r.json().catch(() => ({}));
+                    const results = (d?.results ?? d?.hits) ?? [];
+                    if (!results.length) {
                         resEl.innerHTML = '<p class="text-center py-8 text-slate-500 text-sm">No matches found.</p>';
                         return;
                     }
-                    resEl.innerHTML = d.results.map(res => `
+                    resEl.innerHTML = results.map(res => `
                         <div class="p-4 rounded-xl bg-surface-2/50 border border-surface-3/30 space-y-2">
                             <div class="flex justify-between items-center"><span class="text-[10px] font-bold text-brand-400 uppercase">${res.filename}</span><span class="text-[9px] text-slate-500">${res.score}</span></div>
                             <p class="text-xs text-slate-300 leading-relaxed">${res.chunk}</p>
@@ -978,12 +984,12 @@
                 el.textContent = "AI is analyzing documents...";
                 try {
                     const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/summarize`, { method: "POST" });
-                    const d = await r.json();
+                    const d = await r.json().catch(() => ({}));
                     if (!r.ok) {
-                        el.textContent = d.error || "Summary failed.";
+                        el.textContent = d?.error || "Summary failed.";
                         return;
                     }
-                    el.textContent = d.summary != null ? d.summary : "No summary returned.";
+                    el.textContent = d?.summary ?? "No summary returned.";
                 } catch (e) { el.textContent = "Summary failed."; }
             },
 
@@ -1016,7 +1022,8 @@
             try {
                 const r = await fetch(`${API}/status`);
                 if (!r.ok) return;
-                const d = await r.json();
+                const d = await r.json().catch(() => null);
+                if (!d) return;
                 State.update(d);
                 document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-amber-500";
                 document.getElementById("conn-text").textContent = "Live (HTTP)";
