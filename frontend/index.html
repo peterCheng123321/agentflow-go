@@ -1367,6 +1367,8 @@ const cmdk = (() => {
     items = buildItems(''); activeIdx = 0; render();
     input.focus();
     input.addEventListener('input', ()=>{ items = buildItems(input.value); activeIdx = 0; render(); });
+    input.addEventListener('keydown', e=>{ if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); close(); } });
+    backdrop.addEventListener('pointerdown', e=>{ if(!e.target.closest('.cmdk')) close(); });
   }
   function close(){ if(backdrop){ backdrop.remove(); backdrop=null; } }
   document.addEventListener('keydown', e=>{
