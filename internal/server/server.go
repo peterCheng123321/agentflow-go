@@ -822,6 +822,7 @@ func (s *Server) handleUploadBatch(w http.ResponseWriter, r *http.Request) {
 	os.MkdirAll(filepath.Join(s.cfg.DataDir, "docs"), 0755)
 
 	var savedFiles []string
+	var failedFiles []string
 	for _, header := range fileHeaders {
 		file, err := header.Open()
 		if err != nil {
@@ -836,10 +837,22 @@ func (s *Server) handleUploadBatch(w http.ResponseWriter, r *http.Request) {
 
 		if strings.HasSuffix(strings.ToLower(logicalName), ".zip") {
 			tmpZipPath := filepath.Join(s.cfg.DataDir, "docs", fmt.Sprintf("tmp-%d-%s", time.Now().UnixNano(), logicalName))
-			tmpZip, _ := os.Create(tmpZipPath)
-			io.Copy(tmpZip, file)
+			tmpZip, tmpErr := os.Create(tmpZipPath)
+			if tmpErr != nil {
+				log.Printf("upload batch: create tmp zip %s: %v", tmpZipPath, tmpErr)
+				file.Close()
+				failedFiles = append(failedFiles, logicalName)
+				continue
+			}
+			_, copyErr := io.Copy(tmpZip, file)
 			tmpZip.Close()
 			file.Close()
+			if copyErr != nil {
+				log.Printf("upload batch: copy zip %s: %v", logicalName, copyErr)
+				os.Remove(tmpZipPath)
+				failedFiles = append(failedFiles, logicalName)
+				continue
+			}
 
 			reader, err := zip.OpenReader(tmpZipPath)
 			if err == nil {
@@ -849,6 +862,8 @@ func (s *Server) handleUploadBatch(w http.ResponseWriter, r *http.Request) {
 					}
 					rc, err := f.Open()
 					if err != nil {
+						log.Printf("upload batch: open zip entry %s: %v", f.Name, err)
+						failedFiles = append(failedFiles, f.Name)
 						continue
 					}
 					fName := sanitizeUploadedBasename(filepath.Base(f.Name))
@@ -856,14 +871,26 @@ func (s *Server) handleUploadBatch(w http.ResponseWriter, r *http.Request) {
 						outPath := filepath.Join(s.cfg.DataDir, "docs", fmt.Sprintf("%d-%s", time.Now().UnixNano(), fName))
 						dst, err := os.Create(outPath)
 						if err == nil {
-							io.Copy(dst, rc)
+							_, cerr := io.Copy(dst, rc)
 							dst.Close()
-							savedFiles = append(savedFiles, outPath)
+							if cerr != nil {
+								log.Printf("upload batch: extract %s: %v", fName, cerr)
+								os.Remove(outPath)
+								failedFiles = append(failedFiles, fName)
+							} else {
+								savedFiles = append(savedFiles, outPath)
+							}
+						} else {
+							log.Printf("upload batch: create %s: %v", outPath, err)
+							failedFiles = append(failedFiles, fName)
 						}
 					}
 					rc.Close()
 				}
 				reader.Close()
+			} else {
+				log.Printf("upload batch: open zip %s: %v", logicalName, err)
+				failedFiles = append(failedFiles, logicalName)
 			}
 			os.Remove(tmpZipPath)
 			continue
@@ -872,9 +899,18 @@ func (s *Server) handleUploadBatch(w http.ResponseWriter, r *http.Request) {
 		savePath := filepath.Join(s.cfg.DataDir, "docs", fmt.Sprintf("%d-%s", time.Now().UnixNano(), logicalName))
 		dst, err := os.Create(savePath)
 		if err == nil {
-			io.Copy(dst, file)
+			_, cerr := io.Copy(dst, file)
 			dst.Close()
-			savedFiles = append(savedFiles, savePath)
+			if cerr != nil {
+				log.Printf("upload batch: copy %s: %v", logicalName, cerr)
+				os.Remove(savePath)
+				failedFiles = append(failedFiles, logicalName)
+			} else {
+				savedFiles = append(savedFiles, savePath)
+			}
+		} else {
+			log.Printf("upload batch: create %s: %v", savePath, err)
+			failedFiles = append(failedFiles, logicalName)
 		}
 		file.Close()
 	}
@@ -883,9 +919,14 @@ func (s *Server) handleUploadBatch(w http.ResponseWriter, r *http.Request) {
 		return s.processBatchUpload(j, savedFiles, reqCaseID)
 	})
 
-	s.writeJSON(w, http.StatusAccepted, map[string]interface{}{
-		"job_id": jobID,
-	})
+	resp := map[string]interface{}{
+		"job_id":         jobID,
+		"accepted_count": len(savedFiles),
+	}
+	if len(failedFiles) > 0 {
+		resp["failed"] = failedFiles
+	}
+	s.writeJSON(w, http.StatusAccepted, resp)
 }
 
 func (s *Server) processBatchUpload(j *model.Job, files []string, reqCaseID string) (any, error) {
