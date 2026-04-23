@@ -72,10 +72,10 @@ struct CaseHubView: View {
 
     @ViewBuilder private var hero: some View {
         VStack(alignment: .leading, spacing: AF.Space.m) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(detail?.displayName ?? "Loading…")
-                        .font(.title.weight(.bold))
+                        .font(.largeTitle.weight(.semibold))
                     Text(detail?.matter_type ?? " ")
                         .font(.title3)
                         .foregroundStyle(.secondary)
@@ -87,110 +87,105 @@ struct CaseHubView: View {
             }
 
             if let d = detail {
-                GlassCard(padding: AF.Space.m, radius: AF.Radius.l) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Your next step", systemImage: "flag.checkered")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white.opacity(0.55))
-                        Text(WorkflowGuidance.headline(for: d.state))
-                            .font(.title3.weight(.semibold))
-                        Text(WorkflowGuidance.detail(for: d.state))
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: AF.Space.s) {
+                    Label("Next step", systemImage: "flag.checkered")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text(WorkflowGuidance.headline(for: d.state))
+                        .font(.title3.weight(.semibold))
+                    Text(WorkflowGuidance.detail(for: d.state))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                        if showRejectField {
-                            TextField("Reason for rejection…", text: $rejectReason, axis: .vertical)
-                                .textFieldStyle(.plain)
-                                .lineLimit(2...4)
-                                .padding(10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                                        .fill(Color.black.opacity(0.25))
-                                )
+                    if showRejectField {
+                        TextField("Reason for rejection…", text: $rejectReason, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...4)
+                    }
+
+                    HStack(spacing: AF.Space.s) {
+                        Button {
+                            confirmAdvance = true
+                        } label: {
+                            Label("Advance stage", systemImage: "arrow.right.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(busy)
+                        .confirmationDialog(
+                            "Advance to \(nextStatePretty(from: d.state))?",
+                            isPresented: $confirmAdvance,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Advance", role: .destructive) {
+                                act { try await api.advance(caseID) }
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("You can't undo this without reverting manually.")
                         }
 
-                        HStack(spacing: AF.Space.s) {
+                        Button {
+                            tab = .research
+                            ai.bind(toCase: caseID)
+                        } label: {
+                            Label("Research", systemImage: "sparkles")
+                        }
+                        .buttonStyle(.bordered)
+
+                        if d.needsLawyerAttention {
                             Button {
-                                tab = .research
-                                ai.bind(toCase: caseID)
+                                act { try await api.approveHITL(caseID, state: d.state, approved: true, reason: "") }
                             } label: {
-                                Label("Open research", systemImage: "sparkles")
+                                Label("Approve", systemImage: "checkmark.seal.fill")
                             }
-                            .buttonStyle(.afPrimary)
+                            .buttonStyle(.bordered)
+                            .tint(.green)
+                            .disabled(busy)
 
                             Button {
-                                confirmAdvance = true
+                                if !showRejectField {
+                                    showRejectField = true
+                                } else {
+                                    let r = rejectReason.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    act { try await api.approveHITL(caseID, state: d.state, approved: false, reason: r) }
+                                    showRejectField = false
+                                    rejectReason = ""
+                                }
                             } label: {
-                                Label("Advance stage", systemImage: "arrow.right.circle.fill")
+                                Label(showRejectField ? "Submit rejection" : "Reject…", systemImage: "xmark.circle")
                             }
-                            .buttonStyle(.afGhost)
+                            .buttonStyle(.bordered)
+                            .tint(.orange)
                             .disabled(busy)
-                            .confirmationDialog(
-                                "Advance to \(nextStatePretty(from: d.state))?",
-                                isPresented: $confirmAdvance,
-                                titleVisibility: .visible
-                            ) {
-                                Button("Advance", role: .destructive) {
-                                    act { try await api.advance(caseID) }
-                                }
-                                Button("Cancel", role: .cancel) {}
-                            } message: {
-                                Text("You can't undo this without reverting manually.")
-                            }
+                        }
 
-                            if d.needsLawyerAttention {
-                                Button {
-                                    act { try await api.approveHITL(caseID, state: d.state, approved: true, reason: "") }
-                                } label: {
-                                    Label("Approve", systemImage: "checkmark.seal.fill")
-                                }
-                                .buttonStyle(.afGhost)
-                                .tint(.green)
-                                .disabled(busy)
+                        Spacer()
 
-                                Button {
-                                    if !showRejectField {
-                                        showRejectField = true
-                                    } else {
-                                        let r = rejectReason.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        act { try await api.approveHITL(caseID, state: d.state, approved: false, reason: r) }
-                                        showRejectField = false
-                                        rejectReason = ""
-                                    }
-                                } label: {
-                                    Label(showRejectField ? "Submit rejection" : "Reject…", systemImage: "xmark.circle")
-                                }
-                                .buttonStyle(.afGhost)
-                                .tint(.orange)
-                                .disabled(busy)
+                        Button(role: .destructive) {
+                            confirmDelete = true
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Delete matter")
+                        .disabled(busy)
+                        .confirmationDialog(
+                            "Delete case \(d.displayName)?",
+                            isPresented: $confirmDelete,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Delete", role: .destructive) {
+                                act { try await api.deleteCase(caseID); await onChanged() }
                             }
-
-                            Spacer()
-
-                            Button(role: .destructive) {
-                                confirmDelete = true
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.afGhost)
-                            .help("Delete matter")
-                            .disabled(busy)
-                            .confirmationDialog(
-                                "Delete case \(d.displayName)?",
-                                isPresented: $confirmDelete,
-                                titleVisibility: .visible
-                            ) {
-                                Button("Delete", role: .destructive) {
-                                    act { try await api.deleteCase(caseID); await onChanged() }
-                                }
-                                Button("Cancel", role: .cancel) {}
-                            } message: {
-                                Text("This permanently removes the case and all linked documents and notes.")
-                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("This permanently removes the case and all linked documents and notes.")
                         }
                     }
                 }
+                .padding(AF.Space.m)
+                .afGlassCard()
             } else if let e = errorMsg {
                 Text(e).foregroundStyle(.red).font(.callout)
             }
@@ -215,7 +210,7 @@ struct CaseHubView: View {
                             ZStack {
                                 Circle()
                                     .strokeBorder(
-                                        done ? AF.Palette.tint(s.accent) : Color.white.opacity(0.12),
+                                        done ? AF.Palette.tint(s.accent) : AF.Palette.separator,
                                         lineWidth: isCurrent ? 2.5 : 1.5
                                     )
                                     .background(
@@ -232,7 +227,7 @@ struct CaseHubView: View {
                             }
                             if idx < WorkflowState.allCases.count - 1 {
                                 Rectangle()
-                                    .fill(idx < curIdx ? AF.Palette.tint(s.accent).opacity(0.45) : Color.white.opacity(0.08))
+                                    .fill(idx < curIdx ? AF.Palette.tint(s.accent).opacity(0.45) : AF.Palette.separator)
                                     .frame(width: 2, height: 18)
                             }
                         }
@@ -260,33 +255,20 @@ struct CaseHubView: View {
 
     @ViewBuilder private var tabbedContent: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
+            Picker("Tab", selection: $tab) {
                 ForEach(HubTab.allCases) { t in
-                    Button {
-                        tab = t
-                        if t == .research { ai.bind(toCase: caseID) }
-                    } label: {
-                        Label(t.rawValue, systemImage: t.icon)
-                            .labelStyle(.iconOnly)
-                            .font(.system(size: 13, weight: .medium))
-                            .frame(width: 36, height: 32)
-                            .background(
-                                RoundedRectangle(cornerRadius: AF.Radius.s, style: .continuous)
-                                    .fill(tab == t ? Color.white.opacity(0.12) : Color.clear)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .help(t.rawValue)
+                    Label(t.rawValue, systemImage: t.icon).tag(t)
                 }
-                Spacer()
-                Text(tab.rawValue.uppercased())
-                    .font(.caption2.weight(.bold))
-                    .tracking(1.2)
-                    .foregroundStyle(.white.opacity(0.35))
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
             .padding(.horizontal, AF.Space.m)
             .padding(.vertical, AF.Space.s)
-            Divider().opacity(0.1)
+            .onChange(of: tab) { _, t in
+                if t == .research { ai.bind(toCase: caseID) }
+            }
+
+            Divider()
 
             Group {
                 switch tab {
@@ -428,7 +410,7 @@ struct CaseHubView: View {
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                        .fill(Color.white.opacity(0.05))
+                        .fill(AF.Palette.surface)
                 )
             }
         }
@@ -447,7 +429,7 @@ struct CaseHubView: View {
                                 .padding(10)
                                 .background(
                                     RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                                        .fill(Color.black.opacity(0.20))
+                                        .fill(AF.Palette.surface)
                                 )
                             Button {
                                 let text = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -504,7 +486,7 @@ struct CaseHubView: View {
         .padding(system ? 8 : 10)
         .background(
             RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                .fill(system ? Color.white.opacity(0.03) : Color.white.opacity(0.06))
+                .fill(AF.Palette.surface.opacity(system ? 0.5 : 1.0))
         )
     }
 
