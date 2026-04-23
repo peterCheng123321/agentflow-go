@@ -38,43 +38,46 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $selection) {
-            Section {
-                Picker("Filter", selection: $matterFilter) {
-                    ForEach(MatterListFilter.allCases) { f in
-                        Text(f.rawValue).tag(f)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-
-            Section(matterFilter == .needsAction ? "Queue" : "Open matters") {
-                if filtered.isEmpty {
-                    Text(emptyListHint)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, AF.Space.m)
-                } else {
-                    ForEach(filtered) { c in
-                        SidebarRow(case: c)
-                            .tag(Optional(c.case_id))
-                    }
+            if filtered.isEmpty {
+                Text(emptyListHint)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, AF.Space.m)
+                    .listRowSeparator(.hidden)
+            } else {
+                ForEach(filtered) { c in
+                    SidebarRow(case: c)
+                        .tag(Optional(c.case_id))
                 }
             }
         }
         .listStyle(.sidebar)
+        .navigationTitle("Matters")
         .searchable(text: $search, placement: .sidebar, prompt: "Search matters")
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            footerBar
-        }
         .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
+            ToolbarItem(placement: .automatic) {
+                Menu {
+                    Picker("Filter", selection: $matterFilter) {
+                        ForEach(MatterListFilter.allCases) { f in
+                            Text(f.rawValue).tag(f)
+                        }
+                    }
+                } label: {
+                    Label(matterFilter.rawValue, systemImage: "line.3.horizontal.decrease.circle")
+                }
+                .help("Filter matters")
+            }
+            ToolbarItem(placement: .automatic) {
                 Button(action: onNew) {
                     Label("New matter", systemImage: "plus")
                 }
                 .help("New matter")
+                .keyboardShortcut("n", modifiers: [.command])
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            footerBar
         }
     }
 

@@ -39,6 +39,7 @@ struct ContentView: View {
                     CaseHubView(caseID: c.case_id, onChanged: { await loadCases() })
                         .id(c.case_id)
                         .navigationTitle(c.displayName)
+                        .navigationSubtitle(c.matter_type)
                 } else {
                     EmptyStateView(
                         icon: "briefcase",
@@ -49,24 +50,7 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        router.open(.newCase)
-                    } label: {
-                        Label("New matter", systemImage: "plus")
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    Button {
-                        router.open(.settings)
-                    } label: {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                }
-            }
         }
-        .background(AmbientBackground())
         .task { await loadCases() }
         .onChange(of: selection) { _, new in
             ai.bind(toCase: new)
