@@ -1,1120 +1,1397 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AgentFlow | AI Case Management</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: { sans: ['"Inter"', 'system-ui', 'sans-serif'] },
-                    colors: {
-                        brand: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a5f' },
-                        surface: { 0:'#0b1120',1:'#111827',2:'#1e293b',3:'#334155',4:'#475569' }
-                    }
-                }
-            }
-        }
-    </script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-        .glass { background: rgba(30,41,59,0.4); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.05); }
-        .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-        .is-busy { position: relative; pointer-events: none; }
-        .is-busy::after { content: ""; position: absolute; top: 50%; left: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
-        .is-busy > * { opacity: 0; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-    </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AgentFlow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   AgentFlow Design System v1
+   Tokens → Primitives → Components
+   ============================================================ */
+
+:root{
+  /* ---- Color: foreground ---- */
+  --fg:#ffffff;
+  --fg-dim:#e6e9f2;
+  --fg-muted:#b8bdcc;
+  --fg-faint:#7a8094;
+
+  /* ---- Color: intent ---- */
+  --intent-primary:#7aa2ff;
+  --intent-primary-2:#c48bff;
+  --intent-primary-ink:#0b1534;
+  --intent-success:#4ade80;
+  --intent-warn:#facc15;
+  --intent-danger:#f87171;
+
+  /* ---- Surfaces (3-step elevation over glass) ---- */
+  --surface-0:transparent;
+  --surface-1:rgba(255,255,255,0.05);
+  --surface-2:rgba(255,255,255,0.09);
+  --surface-3:rgba(255,255,255,0.14);
+  --surface-sunken:rgba(0,0,0,0.25);
+  --surface-tint:rgba(20,22,30,0.45);
+
+  /* ---- Strokes ---- */
+  --stroke:rgba(255,255,255,0.12);
+  --stroke-strong:rgba(255,255,255,0.20);
+  --divider:rgba(255,255,255,0.10);
+
+  /* ---- Spacing scale (multiples of 4) ---- */
+  --space-1:4px;  --space-2:8px;  --space-3:12px; --space-4:16px;
+  --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px;
+  --space-12:48px;
+
+  /* ---- Radii (3 tokens) ---- */
+  --radius-sm:8px;
+  --radius-md:14px;
+  --radius-lg:20px;
+  --radius-pill:999px;
+
+  /* ---- Typography ---- */
+  --font-sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter',sans-serif;
+  --font-mono:'SF Mono','Menlo','Cascadia Code',monospace;
+  --text-xs:11px;  --text-sm:12.5px; --text-md:14px;
+  --text-lg:16px;  --text-xl:20px;   --text-2xl:24px;
+  --leading-tight:1.3;
+  --leading-body:1.55;
+
+  /* ---- Motion ---- */
+  --ease-standard:cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized:cubic-bezier(0.3, 0, 0, 1);
+  --dur-quick:120ms;
+  --dur-base:200ms;
+  --dur-slow:320ms;
+
+  /* ---- Elevation (shadow scale) ---- */
+  --elev-1:0 1px 0 rgba(255,255,255,0.06) inset;
+  --elev-2:0 4px 16px rgba(0,0,0,0.18);
+  --elev-3:0 10px 40px rgba(0,0,0,0.35);
+}
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  font-family:var(--font-sans);
+  font-size:var(--text-md);
+  color:var(--fg);
+  background:linear-gradient(160deg, rgba(22,24,38,0.78), rgba(14,16,26,0.82));
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+
+/* ============================================================
+   Layout
+   ============================================================ */
+.app{display:grid;grid-template-columns:240px 1fr;height:100vh}
+.titlebar-spacer{-webkit-app-region:drag;height:38px}
+
+/* ============================================================
+   Sidebar
+   ============================================================ */
+.sidebar{
+  display:flex;flex-direction:column;
+  padding:0 var(--space-3) var(--space-4);gap:var(--space-1);
+  border-right:1px solid var(--divider);
+  background:rgba(255,255,255,0.015);
+}
+.brand{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-1) var(--space-3) var(--space-4)}
+.brand .logo{
+  width:34px;height:34px;border-radius:10px;
+  background:conic-gradient(from 210deg,#7aa2ff,#c48bff,#50c8dc,#7aa2ff);
+  box-shadow:0 4px 16px rgba(122,162,255,0.45);position:relative;
+}
+.brand .logo::after{
+  content:"";position:absolute;inset:3px;border-radius:8px;
+  background:rgba(10,12,18,0.7);backdrop-filter:blur(6px);
+}
+.brand .logo svg{position:absolute;inset:0;margin:auto;z-index:2}
+.brand h1{font-size:var(--text-md);font-weight:600;letter-spacing:0.2px;margin:0}
+.brand .ver{font-size:var(--text-xs);color:var(--fg-muted)}
+
+.nav-group{
+  font-size:10px;text-transform:uppercase;letter-spacing:1.2px;
+  color:var(--fg-muted);padding:var(--space-5) var(--space-3) var(--space-2);
+}
+.nav-item{
+  display:flex;align-items:center;gap:var(--space-3);
+  padding:var(--space-2) var(--space-3);border-radius:11px;
+  color:var(--fg-dim);font-size:13.5px;font-weight:500;cursor:pointer;
+  transition:background var(--dur-quick) var(--ease-standard),
+             color var(--dur-quick) var(--ease-standard);
+  border:1px solid transparent;
+}
+.nav-item:hover{background:var(--surface-1);color:var(--fg)}
+.nav-item.active{
+  background:linear-gradient(135deg, rgba(122,162,255,0.22), rgba(196,139,255,0.18));
+  color:var(--fg);border-color:rgba(255,255,255,0.14);
+  box-shadow:0 4px 16px rgba(122,162,255,0.18), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.nav-item svg{width:16px;height:16px;opacity:0.85}
+.nav-item .badge{
+  margin-left:auto;font-size:10.5px;
+  background:var(--surface-2);border:1px solid var(--stroke);
+  padding:2px 7px;border-radius:var(--radius-pill);color:var(--fg-dim);
+}
+.kbd{
+  font-family:var(--font-mono);font-size:10.5px;
+  padding:2px 6px;border-radius:5px;
+  background:rgba(0,0,0,0.30);border:1px solid var(--stroke);
+  color:var(--fg-muted);
+}
+.sidebar-foot{margin-top:auto;padding:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2);font-size:var(--text-xs);color:var(--fg-muted)}
+
+/* ============================================================
+   Status pill (intent: success/danger)
+   ============================================================ */
+.status-pill{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 10px;border-radius:var(--radius-pill);
+  font-size:var(--text-xs);font-weight:500;width:fit-content;
+  background:rgba(74,222,128,0.10);
+  border:1px solid rgba(74,222,128,0.3);
+  color:#86efac;
+}
+.status-pill .dot{width:6px;height:6px;border-radius:50%;background:var(--intent-success);box-shadow:0 0 8px var(--intent-success)}
+.status-pill[data-intent="danger"]{background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.3);color:#fca5a5}
+.status-pill[data-intent="danger"] .dot{background:var(--intent-danger);box-shadow:0 0 8px var(--intent-danger)}
+
+/* ============================================================
+   Main panel
+   ============================================================ */
+.main{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.view{display:none;flex:1;flex-direction:column;min-height:0}
+.view.active{display:flex}
+.view-head{
+  display:flex;align-items:center;gap:var(--space-4);
+  padding:var(--space-3) var(--space-6) var(--space-4);
+  border-bottom:1px solid var(--divider);
+}
+.view-head h2{margin:0;font-size:var(--text-xl);font-weight:600;letter-spacing:-0.3px}
+.view-head .sub{color:var(--fg-muted);font-size:13px;margin-top:2px}
+.view-head .spacer{flex:1}
+
+/* ============================================================
+   Button — variants via data-intent + data-size
+   ============================================================ */
+.btn{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:8px 14px;border-radius:10px;
+  background:var(--surface-2);border:1px solid var(--stroke);
+  color:var(--fg);font-size:13px;font-weight:500;cursor:pointer;
+  font-family:inherit;
+  transition:background var(--dur-quick) var(--ease-standard),
+             border-color var(--dur-quick) var(--ease-standard),
+             transform var(--dur-quick) var(--ease-standard);
+}
+.btn:hover{background:var(--surface-3);border-color:var(--stroke-strong)}
+.btn:active{transform:translateY(1px)}
+.btn[data-intent="primary"]{
+  background:linear-gradient(135deg,var(--intent-primary),var(--intent-primary-2));
+  border-color:transparent;color:var(--intent-primary-ink);font-weight:600;
+  box-shadow:0 4px 18px rgba(122,162,255,0.35);
+}
+.btn[data-intent="primary"]:hover{filter:brightness(1.08)}
+.btn[data-intent="ghost"]{background:transparent;border-color:transparent}
+.btn[data-intent="ghost"]:hover{background:var(--surface-1)}
+.btn[data-intent="danger"]{color:#fca5a5;border-color:rgba(248,113,113,0.3)}
+.btn[data-intent="danger"]:hover{background:rgba(248,113,113,0.15)}
+.btn[data-size="sm"]{padding:5px 10px;font-size:var(--text-sm)}
+.btn:disabled{opacity:0.5;cursor:not-allowed}
+.spinner{display:inline-block;width:10px;height:10px;margin-left:6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-1px;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ============================================================
+   Inputs
+   ============================================================ */
+.input, textarea, select{
+  width:100%;padding:10px 13px;border-radius:10px;
+  background:var(--surface-sunken);border:1px solid var(--stroke);
+  color:var(--fg);font-size:13.5px;font-family:inherit;
+  outline:none;
+  transition:border-color var(--dur-quick) var(--ease-standard),
+             background var(--dur-quick) var(--ease-standard);
+}
+.input:focus, textarea:focus, select:focus{
+  border-color:var(--intent-primary);background:rgba(0,0,0,0.35);
+}
+textarea{resize:none;min-height:48px;line-height:var(--leading-body)}
+
+/* ============================================================
+   Chip (toggleable + filter)
+   ============================================================ */
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 12px;border-radius:var(--radius-pill);
+  background:var(--surface-1);border:1px solid var(--stroke);
+  cursor:pointer;font-size:var(--text-sm);user-select:none;
+  transition:background var(--dur-quick) var(--ease-standard);
+}
+.chip:hover{background:var(--surface-2)}
+.chip.on{background:rgba(122,162,255,0.22);border-color:rgba(122,162,255,0.42);color:var(--fg)}
+.chip input{display:none}
+
+/* ============================================================
+   State-chip — intent variants
+   ============================================================ */
+.state-chip{
+  font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:var(--radius-pill);
+  background:rgba(122,162,255,0.15);border:1px solid rgba(122,162,255,0.3);color:#c8d7ff;
+  text-transform:uppercase;letter-spacing:0.5px;
+}
+.state-chip[data-intent="success"]{background:rgba(74,222,128,0.12);border-color:rgba(74,222,128,0.3);color:#86efac}
+.state-chip[data-intent="warn"]{background:rgba(250,204,21,0.12);border-color:rgba(250,204,21,0.3);color:#fde68a}
+.state-chip[data-intent="danger"]{background:rgba(248,113,113,0.12);border-color:rgba(248,113,113,0.3);color:#fca5a5}
+
+/* ============================================================
+   Card / Panel
+   ============================================================ */
+.card{
+  background:var(--surface-1);border:1px solid var(--stroke);
+  border-radius:var(--radius-md);padding:var(--space-4);margin-bottom:var(--space-3);
+  backdrop-filter:blur(20px) saturate(160%);
+  -webkit-backdrop-filter:blur(20px) saturate(160%);
+  transition:background var(--dur-quick) var(--ease-standard),
+             border-color var(--dur-quick) var(--ease-standard);
+}
+.card:hover{background:var(--surface-2);border-color:var(--stroke-strong)}
+.card .row{display:flex;align-items:center;gap:var(--space-3)}
+.card .title{font-size:var(--text-md);font-weight:600}
+.card .meta{font-size:var(--text-sm);color:var(--fg-muted);margin-top:3px}
+.card .actions{margin-left:auto;display:flex;gap:6px}
+
+/* ============================================================
+   Stat card
+   ============================================================ */
+.grid-stat{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3);margin-bottom:var(--space-5)}
+.stat{
+  padding:var(--space-4);border-radius:var(--radius-md);
+  background:var(--surface-1);border:1px solid var(--stroke);
+}
+.stat .lbl{font-size:var(--text-xs);color:var(--fg-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.stat .val{font-size:var(--text-2xl);font-weight:600;letter-spacing:-0.5px}
+
+/* ============================================================
+   Tabs
+   ============================================================ */
+.tabs{display:flex;gap:var(--space-1);padding:0 var(--space-6);border-bottom:1px solid var(--divider)}
+.tab{
+  padding:10px 14px;font-size:13.5px;color:var(--fg-muted);
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
+  transition:color var(--dur-quick) var(--ease-standard);
+}
+.tab:hover{color:var(--fg-dim)}
+.tab.active{color:var(--fg);border-bottom-color:var(--intent-primary)}
+
+/* ============================================================
+   Empty state
+   ============================================================ */
+.empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:var(--space-12) var(--space-6);text-align:center;color:var(--fg-muted);
+  gap:var(--space-3);
+}
+.empty .icon{
+  width:56px;height:56px;border-radius:18px;
+  background:var(--surface-1);border:1px solid var(--stroke);
+  display:flex;align-items:center;justify-content:center;
+}
+.empty h4{font-size:var(--text-lg);color:var(--fg);margin:0;font-weight:600}
+.empty p{font-size:var(--text-sm);max-width:340px;line-height:var(--leading-body);margin:0}
+.empty .actions{display:flex;gap:var(--space-2);margin-top:var(--space-2)}
+
+/* ============================================================
+   Skeleton loader
+   ============================================================ */
+.skel{
+  border-radius:var(--radius-sm);
+  background:linear-gradient(90deg,var(--surface-1) 0%,var(--surface-2) 50%,var(--surface-1) 100%);
+  background-size:200% 100%;animation:shimmer 1.4s infinite;
+}
+@keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+.skel.line{height:12px;margin:6px 0}
+.skel.line.short{width:40%}
+.skel.line.med{width:65%}
+.skel.card{height:74px;margin-bottom:var(--space-3)}
+
+/* ============================================================
+   Chat
+   ============================================================ */
+.chat-body{flex:1;display:flex;flex-direction:column;margin:0 var(--space-5) var(--space-5);min-height:0}
+.chat-main{
+  flex:1;overflow-y:auto;padding:var(--space-5) var(--space-8);
+  display:flex;flex-direction:column;gap:var(--space-4);scroll-behavior:smooth;
+}
+.chat-main::-webkit-scrollbar{width:8px}
+.chat-main::-webkit-scrollbar-thumb{background:var(--surface-2);border-radius:4px}
+
+.msg{display:flex;gap:var(--space-3);max-width:85%;animation:fadeUp var(--dur-slow) var(--ease-standard)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.msg .avatar{
+  width:30px;height:30px;border-radius:10px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:var(--text-sm);font-weight:700;
+}
+.msg.user{align-self:flex-end;flex-direction:row-reverse}
+.msg.user .avatar{background:linear-gradient(135deg,var(--intent-primary),var(--intent-primary-2));color:var(--intent-primary-ink)}
+.msg.bot .avatar{background:var(--surface-2);border:1px solid var(--stroke)}
+.msg .bubble{
+  padding:11px 15px;border-radius:var(--radius-md);
+  font-size:var(--text-md);line-height:var(--leading-body);
+  background:var(--surface-1);border:1px solid var(--stroke);
+  backdrop-filter:blur(20px) saturate(160%);
+  -webkit-backdrop-filter:blur(20px) saturate(160%);
+  white-space:pre-wrap;word-wrap:break-word;
+}
+.msg.user .bubble{
+  background:linear-gradient(135deg,rgba(122,162,255,0.3),rgba(196,139,255,0.25));
+  border-color:rgba(122,162,255,0.4);
+}
+.msg .bubble code{background:rgba(0,0,0,0.35);padding:1px 6px;border-radius:5px;font-size:12.5px;font-family:var(--font-mono)}
+.msg .bubble pre{background:rgba(0,0,0,0.4);padding:10px 12px;border-radius:9px;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;margin:8px 0}
+
+.msg .actions-row{
+  display:flex;gap:6px;margin-top:6px;
+  opacity:0;transition:opacity var(--dur-quick) var(--ease-standard);
+}
+.msg:hover .actions-row{opacity:1}
+.msg .icon-btn{
+  width:24px;height:24px;border-radius:7px;
+  display:flex;align-items:center;justify-content:center;
+  background:transparent;border:1px solid transparent;
+  color:var(--fg-muted);cursor:pointer;
+}
+.msg .icon-btn:hover{background:var(--surface-2);color:var(--fg);border-color:var(--stroke)}
+
+/* ---- CitationChip ---- */
+.citations{margin-top:var(--space-2);display:flex;flex-wrap:wrap;gap:6px}
+.citation{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:4px 10px;border-radius:var(--radius-pill);
+  background:var(--surface-2);border:1px solid var(--stroke);
+  color:var(--fg-dim);font-size:var(--text-xs);
+  cursor:pointer;
+  transition:background var(--dur-quick) var(--ease-standard),
+             border-color var(--dur-quick) var(--ease-standard);
+}
+.citation:hover{background:var(--surface-3);border-color:var(--stroke-strong)}
+.citation .num{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;border-radius:50%;
+  background:rgba(122,162,255,0.30);color:var(--fg);
+  font-size:9px;font-weight:700;
+}
+
+.typing{display:inline-flex;gap:4px;padding:4px 0}
+.typing span{width:6px;height:6px;border-radius:50%;background:var(--fg-muted);animation:typing 1.2s infinite}
+.typing span:nth-child(2){animation-delay:0.15s}
+.typing span:nth-child(3){animation-delay:0.3s}
+@keyframes typing{0%,60%,100%{opacity:0.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+
+.chat-compose{
+  padding:10px 12px;border-radius:var(--radius-md);
+  background:var(--surface-2);border:1px solid var(--stroke);
+  backdrop-filter:blur(30px) saturate(180%);
+  -webkit-backdrop-filter:blur(30px) saturate(180%);
+  display:flex;gap:var(--space-3);align-items:flex-end;
+  box-shadow:var(--elev-1);
+}
+.chat-compose textarea{flex:1;background:transparent;border:none;padding:8px 4px;min-height:24px;max-height:180px}
+.chat-compose textarea:focus{background:transparent}
+.chat-opts{display:flex;gap:var(--space-2);align-items:center;padding:0 var(--space-1) var(--space-2);color:var(--fg-muted);font-size:var(--text-sm)}
+
+/* ---- Hero (slimmer per critique) ---- */
+.hero{margin:auto;text-align:center;max-width:480px;padding:var(--space-10) var(--space-5)}
+.hero .orb{
+  width:48px;height:48px;margin:0 auto var(--space-3);border-radius:14px;
+  background:conic-gradient(from 210deg,var(--intent-primary),var(--intent-primary-2),#50c8dc,var(--intent-primary));
+  box-shadow:0 8px 30px rgba(122,162,255,0.4);
+}
+.hero h3{font-size:var(--text-xl);margin:0 0 var(--space-2);font-weight:600}
+.hero p{color:var(--fg-muted);font-size:13.5px;line-height:var(--leading-body);margin:0 0 var(--space-5)}
+.hero .starters{display:flex;flex-wrap:wrap;gap:var(--space-2);justify-content:center}
+
+/* ============================================================
+   Scroll containers
+   ============================================================ */
+.scroll{flex:1;overflow-y:auto;padding:0 var(--space-6) var(--space-6)}
+.scroll::-webkit-scrollbar{width:8px}
+.scroll::-webkit-scrollbar-thumb{background:var(--surface-2);border-radius:4px}
+
+/* ============================================================
+   Settings
+   ============================================================ */
+.settings-grid{max-width:720px;padding:var(--space-2)}
+.settings-grid .group{margin-bottom:var(--space-6)}
+.settings-grid .group h3{font-size:var(--text-md);margin:0 0 var(--space-3);font-weight:600;color:var(--fg)}
+
+/* ============================================================
+   Toast
+   ============================================================ */
+.toast{
+  position:fixed;bottom:var(--space-6);left:50%;transform:translateX(-50%);
+  padding:10px 20px;border-radius:var(--radius-md);
+  background:rgba(20,20,30,0.92);backdrop-filter:blur(20px);
+  border:1px solid var(--stroke);font-size:var(--text-md);z-index:200;
+  box-shadow:var(--elev-3);
+  animation:toastIn var(--dur-slow) var(--ease-emphasized);
+}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translateX(-50%)}}
+.toast[data-intent="danger"]{border-color:rgba(248,113,113,0.4);color:#fca5a5}
+.toast[data-intent="success"]{border-color:rgba(74,222,128,0.4);color:#86efac}
+
+/* ============================================================
+   Drop zone
+   ============================================================ */
+.drop{
+  border:1.5px dashed var(--stroke);border-radius:var(--radius-md);
+  padding:var(--space-8);text-align:center;color:var(--fg-muted);
+  cursor:pointer;margin-bottom:var(--space-3);
+  transition:border-color var(--dur-base) var(--ease-standard),
+             background var(--dur-base) var(--ease-standard);
+}
+.drop:hover, .drop.drag{border-color:var(--intent-primary);background:rgba(122,162,255,0.06);color:var(--fg)}
+
+/* ============================================================
+   Command Palette (⌘K)
+   ============================================================ */
+.cmdk-backdrop{
+  position:fixed;inset:0;z-index:300;
+  background:rgba(0,0,0,0.30);backdrop-filter:blur(8px);
+  display:flex;align-items:flex-start;justify-content:center;
+  padding-top:14vh;
+  animation:fadeIn var(--dur-base) var(--ease-standard);
+}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.cmdk{
+  width:min(620px, 90vw);
+  background:rgba(28,30,42,0.92);backdrop-filter:blur(40px) saturate(180%);
+  border:1px solid var(--stroke-strong);border-radius:var(--radius-lg);
+  box-shadow:var(--elev-3);overflow:hidden;
+  animation:cmdkIn var(--dur-base) var(--ease-emphasized);
+}
+@keyframes cmdkIn{from{opacity:0;transform:translateY(-8px) scale(0.98)}to{opacity:1;transform:none}}
+.cmdk-input{
+  width:100%;padding:var(--space-4) var(--space-5);
+  background:transparent;border:none;border-bottom:1px solid var(--divider);
+  color:var(--fg);font-size:15px;font-family:inherit;outline:none;
+}
+.cmdk-input::placeholder{color:var(--fg-faint)}
+.cmdk-list{max-height:50vh;overflow-y:auto;padding:var(--space-2)}
+.cmdk-section{
+  font-size:10px;text-transform:uppercase;letter-spacing:1.2px;
+  color:var(--fg-muted);padding:var(--space-3) var(--space-3) var(--space-1);
+}
+.cmdk-item{
+  display:flex;align-items:center;gap:var(--space-3);
+  padding:9px 12px;border-radius:10px;cursor:pointer;
+  font-size:13.5px;color:var(--fg-dim);
+}
+.cmdk-item .ic{
+  width:24px;height:24px;border-radius:7px;
+  background:var(--surface-1);border:1px solid var(--stroke);
+  display:flex;align-items:center;justify-content:center;color:var(--fg-muted);
+}
+.cmdk-item .meta{margin-left:auto;font-size:var(--text-xs);color:var(--fg-faint)}
+.cmdk-item.active{background:linear-gradient(135deg,rgba(122,162,255,0.22),rgba(196,139,255,0.18));color:var(--fg)}
+.cmdk-item.active .ic{background:rgba(122,162,255,0.25);border-color:rgba(122,162,255,0.4);color:var(--fg)}
+.cmdk-empty{padding:var(--space-6);text-align:center;color:var(--fg-muted);font-size:var(--text-sm)}
+.cmdk-foot{
+  display:flex;gap:var(--space-3);padding:8px var(--space-4);
+  border-top:1px solid var(--divider);font-size:var(--text-xs);color:var(--fg-muted);
+}
+.cmdk-foot .kbd{background:rgba(0,0,0,0.3)}
+
+/* ============================================================
+   Modal (form dialogs, confirms)
+   ============================================================ */
+.modal-backdrop{
+  position:fixed;inset:0;z-index:400;
+  background:rgba(0,0,0,0.45);backdrop-filter:blur(8px);
+  display:flex;align-items:center;justify-content:center;
+  padding:var(--space-6);
+  animation:fadeIn var(--dur-base) var(--ease-standard);
+}
+.modal{
+  width:min(460px, 92vw);
+  background:rgba(28,30,42,0.92);backdrop-filter:blur(40px) saturate(180%);
+  -webkit-backdrop-filter:blur(40px) saturate(180%);
+  border:1px solid var(--stroke-strong);border-radius:var(--radius-lg);
+  box-shadow:var(--elev-3);overflow:hidden;
+  animation:cmdkIn var(--dur-base) var(--ease-emphasized);
+  display:flex;flex-direction:column;
+}
+.modal-head{padding:var(--space-5) var(--space-5) var(--space-2)}
+.modal-title{font-size:var(--text-lg);font-weight:600;color:var(--fg);margin:0}
+.modal-desc{font-size:var(--text-sm);color:var(--fg-muted);margin:var(--space-2) 0 0;line-height:var(--leading-body)}
+.modal-body{padding:var(--space-4) var(--space-5);display:flex;flex-direction:column;gap:var(--space-3)}
+.modal-field{display:flex;flex-direction:column;gap:6px}
+.modal-field label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:1px;color:var(--fg-muted)}
+.modal-foot{
+  display:flex;justify-content:flex-end;gap:var(--space-2);
+  padding:var(--space-3) var(--space-5) var(--space-5);
+  border-top:1px solid var(--divider);background:var(--surface-1);
+}
+</style>
 </head>
-<body class="min-h-screen bg-surface-0 text-slate-200 antialiased overflow-hidden font-sans">
-    <div id="toast-container" class="fixed bottom-6 right-6 z-50 space-y-2"></div>
-
-    <div class="flex h-screen w-screen">
-        <!-- Sidebar -->
-        <aside class="w-72 flex flex-col border-r border-surface-3/30 bg-surface-1/50 backdrop-blur-xl">
-            <div class="p-6 border-b border-surface-3/20 flex items-center gap-3">
-                <div class="h-8 w-8 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-lg shadow-brand-500/20 flex items-center justify-center text-white font-bold">A</div>
-                <div>
-                    <h1 class="text-sm font-bold text-white tracking-tight">AgentFlow Go</h1>
-                    <p class="text-[10px] text-slate-500 font-medium">Apple Silicon Optimized</p>
-                </div>
-            </div>
-
-            <div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
-                <div>
-                    <div class="flex items-center justify-between mb-3 px-2">
-                        <h2 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Active Cases</h2>
-                        <span id="case-count" class="text-[10px] bg-surface-3 px-1.5 py-0.5 rounded text-slate-400">0</span>
-                    </div>
-                    
-                    <div class="px-2 mb-4">
-                        <div class="relative group">
-                            <input type="text" id="case-search" oninput="Actions.filterCases(this.value)" placeholder="Search 2,000+ cases..." 
-                                   class="w-full bg-surface-2/50 border border-surface-3/30 rounded-lg py-1.5 pl-8 pr-3 text-[10px] text-white focus:outline-none focus:ring-1 focus:ring-brand-500/50 transition-all placeholder:text-slate-600">
-                            <svg class="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-brand-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                        </div>
-                    </div>
-
-                    <div id="case-list" class="space-y-1" style="content-visibility: auto; contain-intrinsic-size: 0 500px;"></div>
-                </div>
-
-                <div>
-                    <h2 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">System Jobs</h2>
-                    <div id="job-list" class="space-y-2"></div>
-                </div>
-            </div>
-
-            <div class="p-4 border-t border-surface-3/20 bg-surface-2/20">
-                <input id="sidebar-upload-input" type="file" multiple class="hidden" onchange="Actions.uploadFiles(event)">
-                <button type="button" onclick="document.getElementById('sidebar-upload-input').click()" class="w-full py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-lg shadow-brand-600/20 active:scale-95 flex items-center justify-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                    Upload file
-                </button>
-                <p class="text-[9px] text-slate-600 text-center mt-2 px-1 leading-snug">Creates or updates a case from the document (same as case detail upload).</p>
-            </div>
-        </aside>
-
-        <!-- Main Content -->
-        <main class="flex-1 flex flex-col min-w-0 bg-surface-0 relative">
-            <!-- Top Header -->
-            <header class="h-16 border-b border-surface-3/20 px-8 flex items-center justify-between shrink-0 bg-surface-0/50 backdrop-blur-md z-10">
-                <div id="breadcrumb" class="flex items-center gap-2 text-xs text-slate-500">
-                    <span>Workspace</span>
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                    <span id="header-case-id" class="text-slate-300 font-medium">No Case Selected</span>
-                </div>
-                
-                <div class="flex items-center gap-4">
-                    <div id="connection-badge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-2/50 border border-surface-3/30">
-                        <span id="conn-dot" class="h-1.5 w-1.5 rounded-full bg-yellow-500 pulse-dot"></span>
-                        <span id="conn-text" class="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Connecting</span>
-                    </div>
-                    <div class="h-4 w-px bg-surface-3/50 mx-1"></div>
-                    <button onclick="UI.openRAGSearch()" class="p-2 text-slate-400 hover:text-white transition-colors">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                    </button>
-                    <button onclick="UI.openSystemModal()" class="p-2 text-slate-400 hover:text-white transition-colors">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                    </button>
-                </div>
-            </header>
-
-            <!-- Case Detail Area -->
-            <div id="detail-view" class="flex-1 overflow-y-auto p-8 custom-scrollbar">
-                <div id="empty-state" class="h-full flex flex-col items-center justify-center text-slate-600 animate-in fade-in duration-500">
-                    <div class="h-24 w-24 rounded-3xl bg-surface-2 flex items-center justify-center mb-6">
-                        <svg class="w-12 h-12 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2 2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
-                    </div>
-                    <h2 class="text-lg font-bold text-slate-400">Select a case to begin</h2>
-                    <p class="text-sm mt-2 max-w-xs text-center">Manage legal documents, track workflows, and generate AI-powered evaluation reports.</p>
-                </div>
-
-                <div id="case-content" class="hidden space-y-8 animate-in slide-in-from-bottom-4 duration-500">
-                    <!-- Case Hero -->
-                    <div class="flex items-start justify-between">
-                        <div>
-                            <div class="flex items-center gap-3 mb-2">
-                                <h1 id="case-client" class="text-3xl font-extrabold text-white tracking-tight">--</h1>
-                                <span id="case-status-badge" class="px-2.5 py-1 rounded-md bg-brand-500/10 text-brand-400 text-[10px] font-bold uppercase tracking-wider border border-brand-500/20">--</span>
-                            </div>
-                            <p id="case-matter" class="text-slate-400 text-sm font-medium">--</p>
-                        </div>
-                        <div class="flex gap-2">
-                            <button onclick="Actions.advanceState(event)" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-lg shadow-brand-600/20 active:scale-95 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                                Next Step
-                            </button>
-                            <button onclick="Actions.deleteCase(event)" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Workflow Visualizer -->
-                    <div class="relative py-8">
-                        <div class="absolute top-1/2 left-0 w-full h-0.5 bg-surface-2 -translate-y-1/2"></div>
-                        <div id="workflow-steps" class="relative flex justify-between px-4"></div>
-                    </div>
-
-                    <!-- Human-in-the-loop (blocks advancing into gated stages) -->
-                    <div id="hitl-panel" class="hidden rounded-2xl p-5 border border-amber-500/35 bg-amber-950/20 space-y-4 mb-2">
-                        <div>
-                            <h3 class="text-[10px] font-bold text-amber-300 uppercase tracking-widest">Human review</h3>
-                            <p id="hitl-panel-desc" class="text-sm text-slate-200 mt-2 leading-relaxed"></p>
-                            <p id="hitl-panel-status" class="text-[11px] text-amber-400/90 mt-2 font-medium"></p>
-                        </div>
-                        <div class="flex flex-col sm:flex-row flex-wrap gap-2 items-stretch sm:items-center">
-                            <input id="hitl-reason" type="text" autocomplete="off" placeholder="Audit note (optional)" class="flex-1 min-w-[200px] rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500/40">
-                            <button type="button" onclick="Actions.submitHITL(true)" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">Approve</button>
-                            <button type="button" onclick="Actions.submitHITL(false)" class="px-5 py-2.5 rounded-xl bg-rose-600/85 hover:bg-rose-600 text-white text-xs font-bold transition-colors">Reject</button>
-                        </div>
-                    </div>
-
-                    <!-- Grid Layout -->
-                    <div class="grid grid-cols-12 gap-6">
-                        <!-- Left Column: Details & Material -->
-                        <div class="col-span-12 lg:col-span-8 space-y-6">
-                            <div class="p-6 rounded-2xl bg-surface-1/50 border border-surface-3/10 shadow-sm">
-                                <div class="flex items-center justify-between mb-6">
-                                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Case Documents</h3>
-                                    <button onclick="document.getElementById('file-input').click()" class="px-3 py-1.5 rounded-lg bg-surface-2 hover:bg-surface-3 text-[10px] font-bold text-brand-400 transition-all">UPLOAD FILE</button>
-                                    <input id="file-input" type="file" multiple class="hidden" onchange="Actions.uploadFiles(event)">
-                                </div>
-                                <div id="document-list" 
-                                     ondragover="event.preventDefault(); this.classList.add('border-brand-500','bg-brand-500/10')"
-                                     ondragleave="event.preventDefault(); this.classList.remove('border-brand-500','bg-brand-500/10')"
-                                     ondrop="event.preventDefault(); this.classList.remove('border-brand-500','bg-brand-500/10'); Actions.uploadFiles({target: {files: event.dataTransfer.files}})"
-                                     class="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 rounded-xl border-2 border-dashed border-transparent transition-all min-h-[150px]"></div>
-                            </div>
-
-                            <div class="p-6 rounded-2xl bg-surface-1/50 border border-surface-3/10 shadow-sm">
-                                <div class="flex items-center justify-between mb-6">
-                                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">AI Summary</h3>
-                                    <button onclick="Actions.generateSummary()" class="text-[10px] font-bold text-brand-400 hover:text-brand-300">REFRESH</button>
-                                </div>
-                                <div id="case-summary" class="text-sm text-slate-300 leading-relaxed bg-surface-2/30 rounded-xl p-4 min-h-[100px] whitespace-pre-wrap">No summary available.</div>
-                            </div>
-                        </div>
-
-                        <!-- Right Column: Activity & Metadata -->
-                        <div class="col-span-12 lg:col-span-4 space-y-6">
-                            <div class="p-6 rounded-2xl bg-surface-1/50 border border-surface-3/10 shadow-sm">
-                                <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Details</h3>
-                                <div class="space-y-5">
-                                    <div><label class="text-[9px] text-slate-500 font-bold block mb-1 uppercase tracking-wider">Case ID</label><p id="case-id-display" class="text-xs text-white font-mono bg-surface-2/50 px-2 py-1 rounded inline-block">--</p></div>
-                                    <div><label class="text-[9px] text-slate-500 font-bold block mb-1 uppercase tracking-wider">Date Created</label><p id="case-created-display" class="text-xs text-white">--</p></div>
-                                    <div><label class="text-[9px] text-slate-500 font-bold block mb-1 uppercase tracking-wider">Channel</label><p id="case-channel-display" class="text-xs text-white">--</p></div>
-                                </div>
-                            </div>
-
-                            <div class="p-6 rounded-2xl bg-surface-1/50 border border-surface-3/10 shadow-sm">
-                                <div class="flex items-center justify-between mb-6">
-                                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Activity</h3>
-                                    <button onclick="UI.openAddNoteModal()" class="h-6 w-6 rounded-lg bg-surface-2 flex items-center justify-center text-slate-400 hover:text-white transition-colors">+</button>
-                                </div>
-                                <div id="activity-log" class="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="titlebar-spacer"></div>
+    <div class="brand">
+      <div class="logo">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 12l8-5M12 12v10M12 12L4 7" stroke="#fff" stroke-width="1.5"/></svg>
+      </div>
+      <div><h1>AgentFlow</h1><div class="ver">v2 · Liquid</div></div>
     </div>
 
-    <!-- Modals -->
-    <div id="new-case-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
-        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200">
-            <h2 class="text-xl font-bold text-white">New Legal Case</h2>
-            <div class="space-y-4">
-                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Client Name</label><input id="nc-name" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all"></div>
-                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Matter Type</label>
-                    <select id="nc-matter" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all">
-                        <option>Commercial Lease Dispute</option>
-                        <option>Civil Litigation</option>
-                        <option>Contract Dispute</option>
-                    </select>
-                </div>
-                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Initial Summary</label><textarea id="nc-msg" rows="3" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all resize-none"></textarea></div>
+    <div class="nav-item" id="cmdk-trigger" title="Open command palette">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M21 21l-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      Search & commands <span class="kbd" style="margin-left:auto">⌘K</span>
+    </div>
+
+    <div class="nav-group">Workspace</div>
+    <div class="nav-item active" data-view="chat">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 11-3.2-6.9L21 3v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Chat <span class="badge">AI</span>
+    </div>
+    <div class="nav-item" data-view="cases">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      Cases <span class="badge" id="nav-case-count">0</span>
+    </div>
+    <div class="nav-item" data-view="docs">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M6 3h9l4 4v14a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.8"/></svg>
+      Documents <span class="badge" id="nav-doc-count">0</span>
+    </div>
+    <div class="nav-item" data-view="jobs">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      Jobs <span class="badge" id="nav-job-count">0</span>
+    </div>
+    <div class="nav-group">System</div>
+    <div class="nav-item" data-view="settings">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9 2 2 0 11-2.8 2.8 1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0 1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.9.3 2 2 0 11-2.8-2.8 1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4 1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.9 2 2 0 012.8-2.8 1.7 1.7 0 001.9.3h.1a1.7 1.7 0 001-1.5V3a2 2 0 014 0 1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3 2 2 0 012.8 2.8 1.7 1.7 0 00-.3 1.9 1.7 1.7 0 001.5 1H21a2 2 0 010 4 1.7 1.7 0 00-1.5 1z" stroke="currentColor" stroke-width="1.5"/></svg>
+      Settings
+    </div>
+    <div class="sidebar-foot">
+      <div id="conn-pill" class="status-pill"><div class="dot"></div>Connecting…</div>
+      <div id="model-info">Model: —</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="titlebar-spacer"></div>
+
+    <!-- ============== CHAT ============== -->
+    <section class="view active" data-view="chat">
+      <div class="view-head">
+        <div><h2>Chat</h2><div class="sub">Ground answers in case documents via RAG, or ask anything.</div></div>
+        <div class="spacer"></div>
+        <button class="btn" data-intent="ghost" data-size="sm" id="chat-clear" title="Clear conversation">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2M19 6l-1 14a1 1 0 01-1 1H7a1 1 0 01-1-1L5 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          Clear
+        </button>
+      </div>
+      <div class="chat-body">
+        <div id="chat-main" class="chat-main">
+          <div class="hero">
+            <div class="orb"></div>
+            <h3>Ask about a case</h3>
+            <p>Pick a case below to ground your answers, or just start typing. Citations appear inline so you can jump to source.</p>
+            <div class="starters">
+              <span class="chip" data-q="Summarize the most recent case and list next actions.">📋 Summarize latest case</span>
+              <span class="chip" data-q="What deadlines are coming up across all my cases?">⏰ Upcoming deadlines</span>
+              <span class="chip" data-q="What are the risks visible across my uploaded contracts?">⚠️ Risk scan</span>
             </div>
-            <div class="flex gap-3 pt-2">
-                <button onclick="Actions.createCase()" class="flex-1 py-3 rounded-xl bg-brand-600 text-white text-sm font-bold shadow-lg shadow-brand-600/20">Create Case</button>
-                <button onclick="Actions.toggleModal('new-case-modal', false)" class="px-6 py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Cancel</button>
-            </div>
+          </div>
         </div>
-    </div>
-
-    <!-- PDF Viewer Modal -->
-    <div id="pdf-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/90 backdrop-blur-md p-4 lg:p-12">
-        <div class="glass w-full h-full rounded-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-            <div class="h-14 border-b border-surface-3/20 flex items-center justify-between px-6 shrink-0 bg-surface-1/50 gap-3">
-                <h3 id="pdf-title" class="text-sm font-bold text-white truncate flex-1 min-w-0">Document Preview</h3>
-                <button type="button" onclick="Actions.openDocInNewTab()" id="pdf-open-tab" class="px-3 py-1.5 rounded-lg bg-surface-3/60 text-[11px] font-bold text-slate-200 hover:text-white hover:bg-surface-3 shrink-0">Open in tab</button>
-                <button onclick="Actions.toggleModal('pdf-modal', false)" class="p-2 text-slate-400 hover:text-white transition-colors shrink-0">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                </button>
-            </div>
-            <div id="doc-preview-wrap" class="flex-1 bg-white/5 relative flex items-center justify-center overflow-auto min-h-[50vh] p-4">
-                <iframe id="pdf-frame" class="w-full h-full min-h-[50vh] border-0" src=""></iframe>
-                <img id="doc-preview-img" class="hidden max-w-full max-h-[85vh] object-contain select-none" alt="Preview" />
-                <pre id="doc-preview-text" class="hidden w-full h-full text-slate-300 whitespace-pre-wrap font-sans text-sm leading-relaxed overflow-auto custom-scrollbar p-6 bg-surface-1/50 rounded-xl border border-surface-3/30"></pre>
-            </div>
+        <div class="chat-opts">
+          <label class="chip on" id="chip-rag"><input type="checkbox" checked> <span>📚 Ground in docs</span></label>
+          <select id="chat-case" class="chip" style="padding:5px 12px">
+            <option value="">No case context</option>
+          </select>
+          <div style="margin-left:auto;font-size:11px;color:var(--fg-muted)" id="chat-status"></div>
         </div>
-    </div>
-
-    <!-- RAG Search Modal -->
-    <div id="rag-search-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
-        <div class="glass w-full max-w-2xl rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
-            <h2 class="text-xl font-bold text-white">Global Knowledge Search</h2>
-            <div class="flex gap-2">
-                <input id="rag-query" class="flex-1 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50" placeholder="Ask anything about the documents...">
-                <button onclick="Actions.searchRAG()" class="px-6 rounded-xl bg-brand-600 text-white text-sm font-bold">Search</button>
-            </div>
-            <div id="rag-results" class="flex-1 overflow-y-auto space-y-4 custom-scrollbar pr-2">
-                <p class="text-center py-8 text-slate-500 text-sm italic">Enter a query to search across all case files.</p>
-            </div>
-            <button onclick="Actions.toggleModal('rag-search-modal', false)" class="w-full py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Close</button>
+        <div class="chat-compose">
+          <textarea id="chat-input" placeholder="Ask AgentFlow…  (⏎ to send, shift+⏎ for new line)" rows="1"></textarea>
+          <button class="btn" data-intent="primary" id="chat-send">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12h16m0 0l-6-6m6 6l-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Send
+          </button>
         </div>
-    </div>
+      </div>
+    </section>
 
-    <!-- System Modal -->
-    <div id="system-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
-        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200">
-            <h2 class="text-xl font-bold text-white">System Status</h2>
-            <div id="system-info" class="space-y-4">
-                <div class="p-4 rounded-xl bg-surface-2/50 space-y-2">
-                    <div class="flex justify-between"><span class="text-[10px] font-bold text-slate-500 uppercase">Platform</span><span id="sys-platform" class="text-xs text-white">--</span></div>
-                    <div class="flex justify-between"><span class="text-[10px] font-bold text-slate-500 uppercase">Memory</span><span id="sys-memory" class="text-xs text-white">--</span></div>
-                    <div class="flex justify-between"><span class="text-[10px] font-bold text-slate-500 uppercase">M-Series</span><span id="sys-apple" class="text-xs text-white">--</span></div>
-                </div>
-            </div>
-            <button onclick="Actions.toggleModal('system-modal', false)" class="w-full py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Close</button>
+    <!-- ============== CASES ============== -->
+    <section class="view" data-view="cases">
+      <div class="view-head">
+        <div><h2>Cases</h2><div class="sub">All active matters and workflow states.</div></div>
+        <div class="spacer"></div>
+        <button class="btn" id="case-refresh">Refresh</button>
+        <button class="btn" data-intent="primary" id="case-new">+ New Case</button>
+      </div>
+      <div class="scroll">
+        <div class="grid-stat" id="case-stats"></div>
+        <div id="case-list"></div>
+      </div>
+    </section>
+
+    <!-- ============== DOCS ============== -->
+    <section class="view" data-view="docs">
+      <div class="view-head">
+        <div><h2>Documents</h2><div class="sub">Upload, search via BM25 / RAG, and preview.</div></div>
+        <div class="spacer"></div>
+        <button class="btn" id="docs-refresh">Refresh</button>
+      </div>
+      <div class="scroll">
+        <div class="drop" id="drop">
+          <div style="font-size:15px;font-weight:600;margin-bottom:6px">Drop files or click to upload</div>
+          <div style="font-size:12px">PDF, TXT, DOCX. Batched upload supported.</div>
+          <input type="file" id="file-input" multiple style="display:none">
         </div>
-    </div>
-
-    <!-- Add Note Modal -->
-    <div id="note-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
-        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200">
-            <h2 class="text-xl font-bold text-white">Add Case Note</h2>
-            <textarea id="note-text" rows="4" class="w-full rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 resize-none"></textarea>
-            <div class="flex gap-3">
-                <button onclick="Actions.addNote()" class="flex-1 py-3 rounded-xl bg-brand-600 text-white text-sm font-bold">Add Note</button>
-                <button onclick="Actions.toggleModal('note-modal', false)" class="px-6 py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Cancel</button>
-            </div>
+        <div style="display:flex;gap:8px;margin-bottom:14px">
+          <input class="input" id="search-q" placeholder="Search across your documents (BM25/RAG)…" />
+          <button class="btn" data-intent="primary" id="search-go">Search</button>
         </div>
-    </div>
+        <div id="doc-list"></div>
+      </div>
+    </section>
 
-    <!-- Edit Case Modal -->
-    <div id="edit-case-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4">
-        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200">
-            <h2 class="text-xl font-bold text-white">Edit Case Info</h2>
-            <div class="space-y-4">
-                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Client Name</label><input id="ec-name" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all"></div>
-                <div><label class="text-[10px] font-bold text-slate-500 uppercase">Matter Type</label>
-                    <select id="ec-matter" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all">
-                        <option>Commercial Lease Dispute</option>
-                        <option>Civil Litigation</option>
-                        <option>Contract Dispute</option>
-                    </select>
-                </div>
+    <!-- ============== JOBS ============== -->
+    <section class="view" data-view="jobs">
+      <div class="view-head">
+        <div><h2>Jobs</h2><div class="sub">Background processing, OCR, and LLM tasks (live via websocket).</div></div>
+        <div class="spacer"></div>
+        <button class="btn" id="jobs-refresh">Refresh</button>
+      </div>
+      <div class="scroll">
+        <div id="job-list"></div>
+      </div>
+    </section>
+
+    <!-- ============== SETTINGS ============== -->
+    <section class="view" data-view="settings">
+      <div class="view-head">
+        <div><h2>Settings</h2><div class="sub">Backend, model, and connection status.</div></div>
+      </div>
+      <div class="scroll">
+        <div class="settings-grid">
+          <div class="group">
+            <h3>Server</h3>
+            <div class="card">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <div><div class="title">API endpoint</div><div class="meta" id="set-url"></div></div>
+                <span class="state-chip" data-intent="success" id="set-health">—</span>
+              </div>
+              <div id="set-meta" style="font-size:12px;color:var(--fg-muted);margin-top:10px"></div>
             </div>
-            <div class="flex gap-3 pt-2">
-                <button onclick="Actions.updateCase()" class="flex-1 py-3 rounded-xl bg-brand-600 text-white text-sm font-bold shadow-lg shadow-brand-600/20">Save Changes</button>
-                <button onclick="Actions.toggleModal('edit-case-modal', false)" class="px-6 py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Cancel</button>
+          </div>
+          <div class="group">
+            <h3>Model</h3>
+            <div class="card" id="set-model"></div>
+          </div>
+          <div class="group">
+            <h3>About</h3>
+            <div class="card">
+              <div class="title" style="margin-bottom:4px">AgentFlow</div>
+              <div class="meta">macOS desktop app built on a Go server and a WKWebView shell. Liquid-glass UI. DashScope / Ollama / MLX backends.</div>
             </div>
+          </div>
         </div>
-    </div>
+      </div>
+    </section>
 
-    <!-- Generic Dialog (prompt/confirm replacement) -->
-    <div id="app-modal" class="fixed inset-0 z-[60] hidden items-center justify-center bg-surface-0/80 backdrop-blur-sm p-4" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
-        <div class="glass w-full max-w-md rounded-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200" data-modal-panel>
-            <h2 id="app-modal-title" class="text-xl font-bold text-white"></h2>
-            <p id="app-modal-body" class="text-sm text-slate-400"></p>
-            <div id="app-modal-field" class="hidden">
-                <label id="app-modal-label" class="text-[10px] font-bold text-slate-500 uppercase"></label>
-                <input id="app-modal-input" class="w-full mt-1.5 rounded-xl bg-surface-2 border border-surface-3/50 px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all">
-            </div>
-            <div class="flex gap-3 pt-2">
-                <button id="app-modal-confirm" class="flex-1 py-3 rounded-xl text-white text-sm font-bold shadow-lg"></button>
-                <button id="app-modal-cancel" class="px-6 py-3 rounded-xl bg-surface-3 text-white text-sm font-bold">Cancel</button>
-            </div>
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   AgentFlow App JS
+   ============================================================ */
+const API = '/v1';
+const state = { cases:[], docs:[], chat:[], chatBusy:false };
+
+const $ = (s,el=document)=>el.querySelector(s);
+const $$ = (s,el=document)=>Array.from(el.querySelectorAll(s));
+const esc = s => (s??'').toString().replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const fmtTime = iso => { try{ return new Date(iso).toLocaleString() }catch{ return iso } };
+
+function toast(msg, intent='success'){
+  const t = document.createElement('div');
+  t.className='toast'; t.dataset.intent=intent; t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>{t.style.opacity=0;t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300)},2400);
+}
+async function apiRaw(url, opts={}){
+  const res = await fetch(url, {headers:{'Content-Type':'application/json',...(opts.headers||{})}, ...opts});
+  const text = await res.text(); let data=null;
+  try{ data = text? JSON.parse(text):null }catch{ data = text }
+  if(!res.ok) throw new Error((data&&data.error)||res.statusText);
+  return data;
+}
+async function api(path, opts={}){ return apiRaw(API + path, opts); }
+async function bareFetch(path, opts={}){ return apiRaw(path, opts); }
+
+async function withBusy(btn, fn){
+  if(!btn || btn.disabled) return;
+  btn.disabled = true;
+  const spin = document.createElement('span'); spin.className='spinner';
+  btn.appendChild(spin);
+  try{ return await fn(); }
+  finally{ spin.remove(); btn.disabled = false; }
+}
+
+/* ---------- EmptyState renderer ---------- */
+function emptyState({icon='📂', title, body, actionLabel, onAction}){
+  const wrap = document.createElement('div');
+  wrap.className = 'empty';
+  wrap.innerHTML = `
+    <div class="icon" style="font-size:24px">${icon}</div>
+    <h4>${esc(title)}</h4>
+    <p>${esc(body)}</p>
+    ${actionLabel?`<div class="actions"><button class="btn" data-intent="primary">${esc(actionLabel)}</button></div>`:''}
+  `;
+  if(actionLabel && onAction) wrap.querySelector('button').addEventListener('click', onAction);
+  return wrap;
+}
+
+/* ---------- Modal helper ----------
+   openModal({title, description, fields, submitLabel, cancelLabel, intent, onSubmit})
+     - fields: [{name, label, placeholder, value, required}]  (omit for confirm dialogs)
+     - onSubmit(values) may return a Promise; throw/reject keeps the modal open.
+   Returns a Promise that resolves with the submitted values (or null if cancelled).
+   Features: backdrop click closes, Escape closes, focus trap, Enter submits. */
+function openModal({title, description, fields=[], submitLabel='Confirm', cancelLabel='Cancel', intent='primary', onSubmit}={}){
+  return new Promise(resolve=>{
+    const prevFocus = document.activeElement;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    const fieldsHtml = fields.map((f,i)=>`
+      <div class="modal-field">
+        <label for="modal-f-${i}">${esc(f.label||f.name)}</label>
+        <input class="input" id="modal-f-${i}" name="${esc(f.name)}"
+          placeholder="${esc(f.placeholder||'')}" value="${esc(f.value||'')}"
+          ${f.required?'required':''} autocomplete="off" />
+      </div>`).join('');
+    backdrop.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <form class="modal-form" novalidate>
+          <div class="modal-head">
+            <h3 class="modal-title" id="modal-title">${esc(title||'')}</h3>
+            ${description?`<p class="modal-desc">${esc(description)}</p>`:''}
+          </div>
+          ${fields.length?`<div class="modal-body">${fieldsHtml}</div>`:''}
+          <div class="modal-foot">
+            <button type="button" class="btn" data-intent="ghost" data-modal-cancel>${esc(cancelLabel)}</button>
+            <button type="submit" class="btn" data-intent="${esc(intent)}" data-modal-submit>${esc(submitLabel)}</button>
+          </div>
+        </form>
+      </div>`;
+    document.body.appendChild(backdrop);
+
+    const modal = backdrop.querySelector('.modal');
+    const form = backdrop.querySelector('form');
+    const submitBtn = backdrop.querySelector('[data-modal-submit]');
+    let settled = false;
+
+    function close(result){
+      if(settled) return;
+      settled = true;
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey, true);
+      if(prevFocus && prevFocus.focus) try{ prevFocus.focus() }catch{}
+      resolve(result);
+    }
+    function focusable(){
+      return Array.from(modal.querySelectorAll(
+        'input,button,textarea,select,[tabindex]:not([tabindex="-1"])'
+      )).filter(el=>!el.disabled && el.offsetParent!==null);
+    }
+    function onKey(e){
+      if(e.key==='Escape'){ e.preventDefault(); close(null); return; }
+      if(e.key==='Tab'){
+        const items = focusable();
+        if(!items.length) return;
+        const first = items[0], last = items[items.length-1];
+        if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+        else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+      }
+    }
+    document.addEventListener('keydown', onKey, true);
+    backdrop.addEventListener('mousedown', e=>{ if(e.target===backdrop) close(null); });
+    backdrop.querySelector('[data-modal-cancel]').addEventListener('click', ()=>close(null));
+
+    form.addEventListener('submit', async e=>{
+      e.preventDefault();
+      const values = {};
+      for(const f of fields){
+        const el = form.querySelector(`[name="${f.name}"]`);
+        values[f.name] = (el?.value||'').trim();
+        if(f.required && !values[f.name]){ el.focus(); return; }
+      }
+      if(onSubmit){
+        submitBtn.disabled = true;
+        try{ await onSubmit(values); }
+        catch(err){ submitBtn.disabled = false; return; } // keep modal open on failure
+      }
+      close(values);
+    });
+
+    // Initial focus: first field, else submit button
+    setTimeout(()=>{
+      const first = modal.querySelector('input') || submitBtn;
+      first?.focus();
+      if(first?.select) try{ first.select() }catch{}
+    }, 0);
+  });
+}
+
+/* ---------- Skeleton helpers ---------- */
+function skelCards(n=3){
+  return Array.from({length:n}, ()=>'<div class="skel card"></div>').join('');
+}
+function skelLines(){
+  return `<div class="skel line med"></div><div class="skel line"></div><div class="skel line short"></div>`;
+}
+
+/* ---------- View switching ---------- */
+function gotoView(v){
+  $$('.nav-item[data-view]').forEach(x=>x.classList.toggle('active', x.dataset.view===v));
+  $$('.view').forEach(x=>x.classList.toggle('active', x.dataset.view===v));
+  if(v==='cases') loadCases();
+  if(v==='docs') loadDocs();
+  if(v==='jobs') loadJobs();
+  if(v==='settings') loadSettings();
+}
+$$('.nav-item[data-view]').forEach(n=>n.addEventListener('click', ()=>gotoView(n.dataset.view)));
+
+/* ============================================================
+   Chat with citations
+   ============================================================ */
+const chatMain = $('#chat-main');
+const chatInput = $('#chat-input');
+const chatCase = $('#chat-case');
+const ragChip = $('#chip-rag');
+ragChip.addEventListener('click', e=>{
+  if(e.target.tagName==='INPUT') return;
+  const cb = ragChip.querySelector('input'); cb.checked = !cb.checked;
+  ragChip.classList.toggle('on', cb.checked);
+});
+
+function renderBubbleHTML(content){
+  let b = esc(content);
+  b = b.replace(/```([\s\S]*?)```/g,(_,c)=>`<pre>${c}</pre>`);
+  b = b.replace(/`([^`]+)`/g,'<code>$1</code>');
+  b = b.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+  return b;
+}
+function appendMsg(m){
+  const hero = chatMain.querySelector('.hero'); if(hero) hero.remove();
+  const el = document.createElement('div');
+  el.className = `msg ${m.role==='bot'?'bot':'user'}`;
+  const av = m.role==='user'?'You':'AF';
+
+  let citations='';
+  if(m.sources && m.sources.length){
+    citations = `<div class="citations">${m.sources.map((s,i)=>{
+      const fname = typeof s==='string' ? s : (s.filename || s.name || '');
+      const score = (s.score!=null) ? ` · ${(s.score*100|0)}%` : '';
+      return `<span class="citation" data-doc="${esc(fname)}" title="Open ${esc(fname)}">
+        <span class="num">${i+1}</span>📄 ${esc(fname)}<span style="color:var(--fg-faint)">${score}</span>
+      </span>`;
+    }).join('')}</div>`;
+  }
+
+  let actions='';
+  if(m.role==='bot' && m.content && !m.error){
+    actions = `<div class="actions-row">
+      <button class="icon-btn" data-act="copy" title="Copy">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="8" y="8" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3" stroke="currentColor" stroke-width="1.7"/></svg>
+      </button>
+      <button class="icon-btn" data-act="redo" title="Regenerate">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 11-3.2-6.9L21 3v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>`;
+  }
+
+  el.innerHTML = `<div class="avatar">${av}</div>
+    <div style="flex:1;min-width:0">
+      <div class="bubble">${renderBubbleHTML(m.content)}${citations}</div>
+      ${actions}
+    </div>`;
+
+  // Wire citation chips → open document in new tab
+  el.querySelectorAll('.citation').forEach(c=>{
+    c.addEventListener('click',()=>{
+      const f = c.dataset.doc; if(!f) return;
+      window.open(`${API}/documents/${encodeURIComponent(f)}/view`, '_blank');
+    });
+  });
+  // Wire copy / regenerate
+  el.querySelectorAll('[data-act="copy"]').forEach(b=>b.addEventListener('click',()=>{
+    navigator.clipboard.writeText(m.content); toast('Copied');
+  }));
+  el.querySelectorAll('[data-act="redo"]').forEach(b=>b.addEventListener('click',()=>{
+    // pop the last bot message and re-send the prior user prompt
+    const idx = state.chat.lastIndexOf(m);
+    if(idx > 0){
+      state.chat = state.chat.slice(0, idx);
+      el.remove();
+      const lastUser = [...state.chat].reverse().find(x=>x.role==='user');
+      if(lastUser){ chatInput.value = lastUser.content; sendChat(); }
+    }
+  }));
+
+  chatMain.appendChild(el);
+  chatMain.scrollTop = chatMain.scrollHeight;
+}
+function appendTyping(){
+  const el = document.createElement('div'); el.className='msg bot'; el.id='typing';
+  el.innerHTML = `<div class="avatar">AF</div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  chatMain.appendChild(el); chatMain.scrollTop = chatMain.scrollHeight;
+}
+async function sendChat(){
+  const text = chatInput.value.trim(); if(!text || state.chatBusy) return;
+  const sendBtn = $('#chat-send');
+  state.chatBusy = true; sendBtn.disabled = true;
+  const spin = document.createElement('span'); spin.className='spinner'; sendBtn.appendChild(spin);
+  const msg = {role:'user', content:text};
+  state.chat.push(msg); appendMsg(msg);
+  chatInput.value=''; autoresize();
+  appendTyping();
+  try{
+    const body = {
+      messages: state.chat.map(m=>({role:m.role==='bot'?'assistant':m.role, content:m.content})),
+      case_id: chatCase.value || '',
+      use_rag: ragChip.querySelector('input').checked,
+    };
+    const r = await api('/chat', {method:'POST', body:JSON.stringify(body)});
+    $('#typing')?.remove();
+    const out = {role:'bot', content:r.reply || '(empty reply)', sources:r.sources||[]};
+    state.chat.push(out); appendMsg(out);
+  }catch(e){
+    $('#typing')?.remove();
+    const err = {role:'bot', content:`⚠️ ${e.message}`, error:true};
+    state.chat.push(err); appendMsg(err);
+  } finally{
+    state.chatBusy=false; spin.remove(); sendBtn.disabled=false; chatInput.focus();
+  }
+}
+$('#chat-send').addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendChat(); }
+});
+function autoresize(){ chatInput.style.height='auto'; chatInput.style.height = Math.min(180, chatInput.scrollHeight)+'px'; }
+chatInput.addEventListener('input', autoresize);
+const chatHeroHTML = chatMain.innerHTML;
+$('#chat-clear').addEventListener('click', ()=>{
+  state.chat = [];
+  chatMain.innerHTML = chatHeroHTML;
+  chatMain.querySelectorAll('.starters .chip').forEach(s=>s.addEventListener('click', ()=>{
+    chatInput.value = s.dataset.q; autoresize(); sendChat();
+  }));
+});
+
+// Starter chips in hero
+chatMain.querySelectorAll('.starters .chip').forEach(s=>s.addEventListener('click', ()=>{
+  chatInput.value = s.dataset.q; autoresize(); sendChat();
+}));
+
+/* ============================================================
+   Cases
+   ============================================================ */
+async function loadCases(){
+  const list = $('#case-list');
+  list.innerHTML = skelCards(4);
+  try{
+    const data = await fetch(API+'/cases').then(r=>r.json());
+    state.cases = data.cases || data || [];
+    $('#nav-case-count').textContent = state.cases.length;
+    chatCase.innerHTML = '<option value="">No case context</option>' + state.cases.map(c=>`<option value="${esc(c.case_id)}">${esc(c.case_id)} · ${esc(c.client_name||'')}</option>`).join('');
+    renderCases();
+  }catch(e){ toast('Failed to load cases: '+e.message,'danger') }
+}
+function renderCases(){
+  const stats = $('#case-stats');
+  const byState = {};
+  for(const c of state.cases){ byState[c.state] = (byState[c.state]||0)+1 }
+  stats.innerHTML = `
+    <div class="stat"><div class="lbl">Total</div><div class="val">${state.cases.length}</div></div>
+    <div class="stat"><div class="lbl">Capture</div><div class="val">${byState.CLIENT_CAPTURE||0}</div></div>
+    <div class="stat"><div class="lbl">In Progress</div><div class="val">${(byState.INITIAL_CONTACT||0)+(byState.CASE_EVALUATION||0)}</div></div>
+    <div class="stat"><div class="lbl">Closed</div><div class="val">${byState.CLOSED||0}</div></div>`;
+  const list = $('#case-list');
+  if(!state.cases.length){
+    list.innerHTML = '';
+    list.appendChild(emptyState({
+      icon:'📁',
+      title:'No cases yet',
+      body:'Create your first matter to start grounding AI answers in client documents.',
+      actionLabel:'+ New Case',
+      onAction: ()=>$('#case-new').click(),
+    }));
+    return;
+  }
+  list.innerHTML = state.cases.map(c=>`
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="title">${esc(c.client_name||'—')} <span class="state-chip">${esc(c.state||'')}</span></div>
+          <div class="meta">${esc(c.case_id)} · ${esc(c.matter_type||'')} · ${fmtTime(c.updated_at)}</div>
         </div>
-    </div>
+        <div class="actions">
+          <button class="btn" data-size="sm" data-chat="${esc(c.case_id)}">Ask AI</button>
+          <button class="btn" data-size="sm" data-advance="${esc(c.case_id)}">Advance →</button>
+          <button class="btn" data-size="sm" data-intent="danger" data-delete="${esc(c.case_id)}">Delete</button>
+        </div>
+      </div>
+    </div>`).join('');
+  list.querySelectorAll('[data-chat]').forEach(b=>b.addEventListener('click',()=>{
+    chatCase.value = b.dataset.chat;
+    chatInput.value = `Summarize case ${b.dataset.chat} and list next steps.`;
+    gotoView('chat');
+    sendChat();
+  }));
+  list.querySelectorAll('[data-advance]').forEach(b=>b.addEventListener('click', ()=>withBusy(b, async ()=>{
+    try{ await api(`/cases/${b.dataset.advance}/advance`,{method:'POST',body:'{}'}); toast('Advanced'); loadCases(); }
+    catch(e){ toast(e.message,'danger') }
+  })));
+  list.querySelectorAll('[data-delete]').forEach(b=>b.addEventListener('click', async ()=>{
+    const ok = await openModal({
+      title:'Delete case?',
+      description:`Case ${b.dataset.delete} will be permanently removed. This cannot be undone.`,
+      submitLabel:'Delete',
+      cancelLabel:'Cancel',
+      intent:'danger',
+    });
+    if(!ok) return;
+    withBusy(b, async ()=>{
+      try{ await api(`/cases/${b.dataset.delete}`,{method:'DELETE'}); toast('Deleted'); loadCases(); }
+      catch(e){ toast(e.message,'danger') }
+    });
+  }));
+}
+$('#case-refresh').addEventListener('click', loadCases);
+$('#case-new').addEventListener('click', ()=>{
+  openModal({
+    title:'New case',
+    description:'Create a new case. You can add documents and run the workflow afterwards.',
+    submitLabel:'Create case',
+    fields:[
+      {name:'client_name', label:'Client name', placeholder:'ClientX', value:'ClientX', required:true},
+      {name:'matter_type', label:'Matter type', placeholder:'Commercial Lease Dispute', value:'Commercial Lease Dispute', required:true},
+    ],
+    onSubmit: async values => {
+      try{
+        await api('/cases/create',{method:'POST',body:JSON.stringify({
+          client_name:values.client_name, matter_type:values.matter_type, source_channel:'UI',
+        })});
+        toast('Created'); loadCases();
+      }catch(e){ toast(e.message,'danger'); throw e; }
+    },
+  });
+});
 
-    <script>
-        const API = window.location.origin + "/v1";
+/* ============================================================
+   Documents
+   ============================================================ */
+async function loadDocs(){
+  const el = $('#doc-list'); el.innerHTML = skelCards(3);
+  try{
+    const data = await fetch(API+'/documents').then(r=>r.json());
+    state.docs = data.documents || data || [];
+    $('#nav-doc-count').textContent = state.docs.length;
+    renderDocs(state.docs);
+  }catch(e){ toast('Failed to load docs: '+e.message,'danger') }
+}
+function renderDocs(list){
+  const el = $('#doc-list');
+  if(!list.length){
+    el.innerHTML = '';
+    el.appendChild(emptyState({
+      icon:'📄',
+      title:'No documents yet',
+      body:'Drop a PDF, TXT, or DOCX above. Documents are indexed for RAG search and used to ground chat answers.',
+    }));
+    return;
+  }
+  el.innerHTML = list.map(d=>`
+    <div class="card"><div class="row">
+      <div>
+        <div class="title">${esc(d.filename||d.name||'unnamed')}</div>
+        <div class="meta">${esc(d.content_type||d.type||'')} ${d.size? ' · '+(d.size/1024|0)+' KB':''} ${d.chunks?' · '+d.chunks+' chunks':''}</div>
+      </div>
+      <div class="actions">
+        <button class="btn" data-size="sm" data-view-doc="${esc(d.filename)}">View</button>
+      </div>
+    </div></div>`).join('');
+  el.querySelectorAll('[data-view-doc]').forEach(b=>b.addEventListener('click',()=>{
+    window.open(`${API}/documents/${encodeURIComponent(b.dataset.viewDoc)}/view`, '_blank');
+  }));
+}
+$('#docs-refresh').addEventListener('click', loadDocs);
+$('#search-go').addEventListener('click', doSearch);
+$('#search-q').addEventListener('keydown', e=>{ if(e.key==='Enter') doSearch() });
+async function doSearch(){
+  const q = $('#search-q').value.trim(); if(!q) return loadDocs();
+  try{
+    const r = await api('/rag/search',{method:'POST',body:JSON.stringify({query:q, top_k:10})});
+    const hits = r.results || r.hits || [];
+    const el = $('#doc-list');
+    if(!hits.length){
+      el.innerHTML='';
+      el.appendChild(emptyState({icon:'🔍', title:'No matches', body:`Nothing in the index matched "${q}". Try fewer words or different terms.`}));
+      return;
+    }
+    el.innerHTML = hits.map((h,i)=>`
+      <div class="card">
+        <div class="title">#${i+1} ${esc(h.filename||'')} <span style="color:var(--fg-muted);font-weight:400">score ${(h.score||0).toFixed(3)}</span></div>
+        <div class="meta" style="margin-top:8px;line-height:1.5;white-space:pre-wrap">${esc((h.chunk||'').slice(0,480))}${(h.chunk||'').length>480?'…':''}</div>
+      </div>`).join('');
+  }catch(e){ toast(e.message,'danger') }
+}
 
-        // Tunables — centralized so they're easy to find/tweak.
-        const TOAST_DISMISS_MS = 4000;
-        const WS_BACKOFF_MIN_MS = 1000;
-        const WS_BACKOFF_MAX_MS = 30000;
-        const HTTP_POLL_INTERVAL_MS = 4000;
+const drop = $('#drop'); const fi = $('#file-input');
+drop.addEventListener('click', ()=>fi.click());
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.add('drag')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.remove('drag')}));
+drop.addEventListener('drop', e=>{e.preventDefault(); handleFiles(e.dataTransfer.files)});
+fi.addEventListener('change', ()=>handleFiles(fi.files));
+async function handleFiles(files){
+  if(!files||!files.length) return;
+  const fd = new FormData();
+  for(const f of files) fd.append('files', f);
+  try{
+    const r = await fetch(API+'/upload/batch',{method:'POST', body:fd});
+    if(!r.ok) throw new Error(await r.text());
+    toast(`Uploaded ${files.length} file(s)`); loadDocs();
+  }catch(e){ toast('Upload failed: '+e.message,'danger') }
+}
 
-        function escapeHtmlAttr(s) {
-            return String(s)
-                .replace(/&/g, "&amp;")
-                .replace(/"/g, "&quot;")
-                .replace(/</g, "&lt;");
-        }
+/* ============================================================
+   Jobs
+   ============================================================ */
+async function loadJobs(){
+  const el = $('#job-list'); el.innerHTML = skelCards(2);
+  try{
+    const s = await fetch(API+'/status').then(r=>r.json());
+    const list = s.jobs || [];
+    $('#nav-job-count').textContent = list.length;
+    if(!list.length){
+      el.innerHTML='';
+      el.appendChild(emptyState({
+        icon:'⚙️',
+        title:'All quiet',
+        body:'No active background jobs. OCR, embeddings, and LLM tasks will appear here as they run.',
+      }));
+      return;
+    }
+    el.innerHTML = list.map(j=>{
+      const intent = j.status==='completed'?'success':(j.status==='failed'?'danger':'warn');
+      return `<div class="card"><div class="row">
+        <div>
+          <div class="title">${esc(j.type||j.job_id||'job')} <span class="state-chip" data-intent="${intent}">${esc(j.status||'')}</span></div>
+          <div class="meta">${esc(j.job_id||'')} ${j.progress!=null?' · '+Math.round(j.progress*100)+'%':''} ${j.message?' · '+esc(j.message):''}</div>
+        </div>
+      </div></div>`;
+    }).join('');
+  }catch(e){ toast(e.message,'danger') }
+}
+$('#jobs-refresh').addEventListener('click', loadJobs);
 
-        function escapeHtml(s) {
-            return String(s)
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;");
-        }
+/* ============================================================
+   Settings
+   ============================================================ */
+async function loadSettings(){
+  $('#set-url').textContent = location.origin;
+  try{
+    const h = await bareFetch('/health');
+    $('#set-health').textContent = h.status || 'ok';
+    $('#set-health').dataset.intent = 'success';
+    $('#set-meta').innerHTML = `uptime <b>${esc(h.uptime||'')}</b> · version <b>${esc(h.version||'')}</b>`;
+  }catch{
+    $('#set-health').textContent='offline'; $('#set-health').dataset.intent='danger';
+  }
+  try{
+    const m = await bareFetch('/api/models');
+    const active = m.active || m.current || m.model || '';
+    $('#model-info').textContent = 'Model: ' + (active || m.name || 'unknown');
+    const available = m.available || m.models || [];
+    $('#set-model').innerHTML = `
+      <div class="row" style="justify-content:space-between">
+        <div><div class="title">${esc(active||'unknown')}</div>
+        <div class="meta">Backend: ${esc(m.backend||'—')} · ${available.length||0} available</div></div>
+        <span class="state-chip" data-intent="success">active</span>
+      </div>`;
+  }catch(e){
+    $('#set-model').innerHTML = `<div class="meta">Could not load models: ${esc(e.message)}</div>`;
+  }
+}
 
-        function openModal(opts) {
-            const {
-                type = "confirm",
-                title = "",
-                body = "",
-                label = "",
-                placeholder = "",
-                defaultValue = "",
-                confirmText,
-                cancelText = "Cancel",
-                intent = "primary",
-            } = opts || {};
+/* ============================================================
+   WebSocket live updates
+   ============================================================ */
+function openWS(){
+  try{
+    const url = location.origin.replace(/^http/,'ws')+'/ws';
+    const ws = new WebSocket(url);
+    ws.onopen = ()=>{ $('#conn-pill').innerHTML='<div class="dot"></div>Connected'; $('#conn-pill').dataset.intent='success' };
+    ws.onclose = ()=>{ $('#conn-pill').innerHTML='<div class="dot"></div>Reconnecting…'; $('#conn-pill').dataset.intent='danger'; setTimeout(openWS,3000) };
+    ws.onmessage = ev=>{
+      try{
+        const m = JSON.parse(ev.data);
+        if(m.type==='job_update' || m.type==='job'){ loadJobs() }
+        if(m.type==='case_update'){ loadCases() }
+      }catch{}
+    };
+  }catch{}
+}
 
-            const modal = document.getElementById("app-modal");
-            const panel = modal.querySelector("[data-modal-panel]");
-            const titleEl = document.getElementById("app-modal-title");
-            const bodyEl = document.getElementById("app-modal-body");
-            const fieldEl = document.getElementById("app-modal-field");
-            const labelEl = document.getElementById("app-modal-label");
-            const inputEl = document.getElementById("app-modal-input");
-            const confirmBtn = document.getElementById("app-modal-confirm");
-            const cancelBtn = document.getElementById("app-modal-cancel");
+/* ============================================================
+   Command Palette (⌘K)
+   ============================================================ */
+const cmdk = (() => {
+  let backdrop=null, input=null, listEl=null, items=[], activeIdx=0;
 
-            titleEl.textContent = title;
-            bodyEl.textContent = body;
-            bodyEl.classList.toggle("hidden", !body);
+  function buildItems(query=''){
+    const q = query.toLowerCase().trim();
+    const out = [];
 
-            if (type === "prompt") {
-                fieldEl.classList.remove("hidden");
-                labelEl.textContent = label;
-                inputEl.value = defaultValue;
-                inputEl.placeholder = placeholder;
-            } else {
-                fieldEl.classList.add("hidden");
-            }
+    // --- Navigation ---
+    const nav = [
+      {label:'Go to Chat',      view:'chat',     ic:'💬', section:'Navigate'},
+      {label:'Go to Cases',     view:'cases',    ic:'📁', section:'Navigate'},
+      {label:'Go to Documents', view:'docs',     ic:'📄', section:'Navigate'},
+      {label:'Go to Jobs',      view:'jobs',     ic:'⚙️', section:'Navigate'},
+      {label:'Go to Settings',  view:'settings', ic:'⚙', section:'Navigate'},
+    ];
+    nav.forEach(n => {
+      if(!q || n.label.toLowerCase().includes(q)) out.push({...n, do:()=>gotoView(n.view), meta:'⏎'});
+    });
 
-            confirmBtn.textContent = confirmText || (type === "prompt" ? "Save" : intent === "danger" ? "Delete" : "Confirm");
-            confirmBtn.className = "flex-1 py-3 rounded-xl text-white text-sm font-bold shadow-lg " +
-                (intent === "danger" ? "bg-rose-600 shadow-rose-600/20" : "bg-brand-600 shadow-brand-600/20");
-            cancelBtn.textContent = cancelText;
-
-            modal.classList.remove("hidden");
-            modal.classList.add("flex");
-
-            const previouslyFocused = document.activeElement;
-            const focusables = () => Array.from(panel.querySelectorAll(
-                'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-            )).filter(el => !el.disabled && el.offsetParent !== null);
-
-            (type === "prompt" ? inputEl : confirmBtn).focus();
-
-            return new Promise((resolve) => {
-                function cleanup(value) {
-                    modal.classList.add("hidden");
-                    modal.classList.remove("flex");
-                    confirmBtn.onclick = null;
-                    cancelBtn.onclick = null;
-                    modal.onclick = null;
-                    inputEl.onkeydown = null;
-                    document.removeEventListener("keydown", onKey, true);
-                    if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
-                    resolve(value);
-                }
-                function onConfirm() {
-                    cleanup(type === "prompt" ? inputEl.value.trim() : true);
-                }
-                function onCancel() {
-                    cleanup(type === "prompt" ? null : false);
-                }
-                function onKey(e) {
-                    if (e.key === "Escape") { e.preventDefault(); onCancel(); return; }
-                    if (e.key === "Tab") {
-                        const items = focusables();
-                        if (!items.length) return;
-                        const first = items[0];
-                        const last = items[items.length - 1];
-                        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-                        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-                    }
-                }
-                confirmBtn.onclick = onConfirm;
-                cancelBtn.onclick = onCancel;
-                modal.onclick = (e) => { if (e.target === modal) onCancel(); };
-                inputEl.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); onConfirm(); } };
-                document.addEventListener("keydown", onKey, true);
-            });
-        }
-
-
-        const State = {
-            cases: [],
-            selectedCase: null,
-            jobs: {},
-            caseFilter: "",
-            workflow: [
-                { key: "CLIENT_CAPTURE", label: "Intake" },
-                { key: "INITIAL_CONTACT", label: "Contact" },
-                { key: "CASE_EVALUATION", label: "Evaluation" },
-                { key: "FEE_COLLECTION", label: "Fees" },
-                { key: "GROUP_CREATION", label: "Setup" },
-                { key: "MATERIAL_INGESTION", label: "Materials" },
-                { key: "DOCUMENT_GENERATION", label: "Drafting" },
-                { key: "CLIENT_APPROVAL", label: "Approval" },
-                { key: "FINAL_PDF_SEND", label: "Delivery" },
-                { key: "ARCHIVE_CLOSE", label: "Closed" }
-            ],
-
-            hitlGateLabels: {
-                CASE_EVALUATION: "Case evaluation (risk and merits review)",
-                DOCUMENT_GENERATION: "Document drafting (templates and pleadings)",
-                FINAL_PDF_SEND: "Final PDF delivery to client"
-            },
-
-            pendingHITLGate(c) {
-                if (!c || !c.state) return null;
-                const order = this.workflow.map(w => w.key);
-                const i = order.indexOf(c.state);
-                if (i < 0 || i >= order.length - 1) return null;
-                const gate = order[i + 1];
-                if (!this.hitlGateLabels[gate]) return null;
-                const approvals = c.hitl_approvals || {};
-                if (approvals[gate] === true) return null;
-                const status = approvals[gate] === false ? "rejected" : "pending";
-                return { gate, label: this.hitlGateLabels[gate], status };
-            },
-
-            update(data) {
-                if (!data || typeof data !== "object") return;
-                if (Array.isArray(data.cases)) this.cases = data.cases;
-                if (Array.isArray(data.jobs)) {
-                    const newJobs = {};
-                    data.jobs.forEach(j => {
-                        if (j && j.id) newJobs[j.id] = j;
-                    });
-                    this.jobs = newJobs;
-                }
-                if (this.selectedCase) {
-                    const updated = this.cases.find(c => c.case_id === this.selectedCase.case_id);
-                    if (updated) this.selectedCase = updated;
-                }
-                UI.render();
-            },
-
-            async fetchFullCase(id) {
-                try {
-                    const r = await fetch(`${API}/cases/${id}`);
-                    const d = await r.json().catch(() => null);
-                    if (!r.ok || !d || typeof d !== "object") {
-                        UI.toast("Failed to fetch case", "error");
-                        return;
-                    }
-                    this.selectedCase = d;
-                    UI.render();
-                } catch (e) { UI.toast("Failed to fetch case", "error"); }
-            }
-        };
-
-        const UI = {
-            toast(msg, type = "info") {
-                const colors = { info: "bg-brand-600", success: "bg-emerald-600", error: "bg-rose-600" };
-                const el = document.createElement("div");
-                el.className = `p-4 rounded-xl ${colors[type]} text-white text-xs font-bold shadow-xl animate-in slide-in-from-right-4 duration-300`;
-                el.textContent = msg;
-                document.getElementById("toast-container").appendChild(el);
-                setTimeout(() => el.remove(), TOAST_DISMISS_MS);
-            },
-
-            render() {
-                this.renderCaseList();
-                this.renderCaseDetail();
-                this.renderJobs();
-            },
-
-            renderCaseList() {
-                const list = document.getElementById("case-list");
-                
-                const filtered = State.caseFilter 
-                    ? State.cases.filter(c => 
-                        c.client_name.toLowerCase().includes(State.caseFilter.toLowerCase()) || 
-                        c.case_id.toLowerCase().includes(State.caseFilter.toLowerCase()))
-                    : State.cases;
-
-                document.getElementById("case-count").textContent = filtered.length;
-                
-                // Use a document fragment for faster DOM insertion of large lists
-                const fragment = document.createDocumentFragment();
-                filtered.forEach(c => {
-                    const active = State.selectedCase?.case_id === c.case_id;
-                    const el = document.createElement("button");
-                    el.type = "button";
-                    el.dataset.caseId = c.case_id;
-                    el.className = `case-row-btn group w-full flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all text-left ${active ? 'bg-brand-500/10 border border-brand-500/30' : 'hover:bg-surface-2/50 border border-transparent'}`;
-                    el.innerHTML = `
-                        <div class="min-w-0 pointer-events-none">
-                            <h4 class="text-xs font-bold ${active ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'} truncate">${escapeHtml(c.client_name)}</h4>
-                            <p class="text-[9px] text-slate-500 font-medium truncate mt-0.5">${escapeHtml(c.matter_type)}</p>
-                        </div>
-                        <div class="h-1.5 w-1.5 rounded-full shrink-0 pointer-events-none ${active ? 'bg-brand-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]' : 'bg-surface-3'}"></div>
-                    `;
-                    fragment.appendChild(el);
-                });
-                
-                list.innerHTML = "";
-                list.appendChild(fragment);
-            },
-
-            renderCaseDetail() {
-                if (!State.selectedCase) {
-                    document.getElementById("empty-state").classList.remove("hidden");
-                    document.getElementById("case-content").classList.add("hidden");
-                    document.getElementById("header-case-id").textContent = "No Case Selected";
-                    return;
-                }
-
-                document.getElementById("empty-state").classList.add("hidden");
-                document.getElementById("case-content").classList.remove("hidden");
-
-                const c = State.selectedCase;
-                document.getElementById("header-case-id").textContent = c.case_id;
-                document.getElementById("case-client").textContent = c.client_name;
-                document.getElementById("case-matter").textContent = c.matter_type;
-                document.getElementById("case-id-display").textContent = c.case_id;
-                document.getElementById("case-channel-display").textContent = c.source_channel || "Direct";
-                document.getElementById("case-created-display").textContent = new Date(c.created_at).toLocaleDateString();
-                document.getElementById("case-status-badge").textContent = c.state.replace(/_/g, " ");
-
-                const sumEl = document.getElementById("case-summary");
-                if (sumEl) {
-                    sumEl.textContent = (c.ai_case_summary && String(c.ai_case_summary).trim())
-                        ? c.ai_case_summary
-                        : "No summary available. Click REFRESH to generate.";
-                }
-
-                const hitl = document.getElementById("hitl-panel");
-                const ph = State.pendingHITLGate(c);
-                if (hitl) {
-                    if (ph) {
-                        hitl.classList.remove("hidden");
-                        hitl.dataset.gateState = ph.gate;
-                        const cur = State.workflow.find(w => w.key === c.state);
-                        document.getElementById("hitl-panel-desc").textContent =
-                            `Current stage: ${cur ? cur.label : c.state}. To move into the next stage, a reviewer must sign off on: ${ph.label}.`;
-                        document.getElementById("hitl-panel-status").textContent =
-                            ph.status === "rejected"
-                                ? "Previous decision: rejected — approve below when ready to proceed, or reject again with a note."
-                                : "Awaiting reviewer approval.";
-                    } else {
-                        hitl.classList.add("hidden");
-                        delete hitl.dataset.gateState;
-                    }
-                }
-
-                this.renderWorkflow();
-                this.renderDocuments();
-                this.renderActivity();
-            },
-
-            renderWorkflow() {
-                const currentIdx = State.workflow.findIndex(w => w.key === State.selectedCase.state);
-                document.getElementById("workflow-steps").innerHTML = State.workflow.map((w, i) => {
-                    const completed = i < currentIdx;
-                    const active = i === currentIdx;
-                    return `
-                        <div class="flex flex-col items-center gap-2 relative z-10 group">
-                            <div class="h-3 w-3 rounded-full border-2 transition-all duration-700 ${completed ? 'bg-emerald-500 border-emerald-500' : active ? 'bg-brand-500 border-brand-500 scale-125 shadow-[0_0_12px_rgba(59,130,246,0.4)]' : 'bg-surface-1 border-surface-2'}"></div>
-                            <span class="text-[8px] font-bold uppercase tracking-widest ${active ? 'text-white' : 'text-slate-600'}">${w.label}</span>
-                        </div>
-                    `;
-                }).join("");
-            },
-
-            renderDocuments() {
-                const docs = State.selectedCase.uploaded_documents || [];
-                const sums = State.selectedCase.ai_file_summaries || [];
-                const byName = {};
-                for (const row of sums) {
-                    if (row && row.filename) byName[row.filename] = row;
-                }
-                document.getElementById("document-list").innerHTML = docs.length ? docs.map(d => {
-                    const row = byName[d];
-                    const cls = row && row.classification;
-                    const sub = (cls && (cls.display_name_zh || cls.document_type))
-                        ? String(cls.display_name_zh || cls.document_type)
-                        : "View";
-                        
-                    let summaryHtml = "";
-                    if (cls) {
-                        const summary = cls.summary_zh || "No summary available.";
-                        const entities = cls.entities || {};
-                        const plaintiffs = (entities.plaintiffs || []).join(", ") || "--";
-                        const defendants = (entities.defendants || []).join(", ") || "--";
-                        
-                        summaryHtml = `
-                            <div class="mt-3 pt-3 border-t border-surface-3/10 pointer-events-none">
-                                <p class="text-[9px] text-slate-400 mb-2 leading-relaxed" title="${escapeHtmlAttr(summary)}">${escapeHtml(summary)}</p>
-                                <div class="flex flex-col gap-1">
-                                    <div class="flex items-start gap-1"><span class="text-[8px] font-bold text-slate-500 uppercase shrink-0">原告/申请:</span> <span class="text-[9px] text-emerald-400 truncate font-semibold">${escapeHtml(plaintiffs)}</span></div>
-                                    <div class="flex items-start gap-1"><span class="text-[8px] font-bold text-slate-500 uppercase shrink-0">被告/被申:</span> <span class="text-[9px] text-rose-400 truncate font-semibold">${escapeHtml(defendants)}</span></div>
-                                </div>
-                            </div>
-                        `;
-                    }
-
-                    return `
-                    <div class="doc-card p-4 rounded-xl bg-surface-2/40 border border-surface-3/10 hover:border-brand-500/30 transition-all group flex flex-col relative">
-                        <button type="button" onclick="Actions.deleteDocument('${escapeHtmlAttr(State.selectedCase.case_id)}', '${escapeHtmlAttr(d)}')" class="absolute top-2 right-2 p-1.5 rounded-md bg-surface-3/60 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 opacity-0 group-hover:opacity-100 transition-all z-10" title="Delete Document">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                        </button>
-                        <div role="button" tabindex="0" onclick="Actions.viewDocument('${escapeHtmlAttr(d)}')" class="flex items-center gap-3 cursor-pointer">
-                            <div class="h-8 w-8 shrink-0 rounded-lg bg-surface-3 flex items-center justify-center text-slate-500 group-hover:text-brand-400">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                            </div>
-                            <div class="min-w-0 flex-1">
-                                <p class="text-[10px] font-bold text-slate-300 truncate" title="${escapeHtmlAttr(d)}">${escapeHtml(d)}</p>
-                                <p class="text-[8px] text-slate-500 font-bold uppercase tracking-tight truncate">${escapeHtml(sub)}</p>
-                            </div>
-                        </div>
-                        ${summaryHtml}
-                    </div>
-                `;
-                }).join("") : '<div class="col-span-full py-8 text-center text-[9px] text-slate-600 font-bold border-2 border-dashed border-surface-2 rounded-2xl">NO FILES</div>';
-            },
-
-            renderActivity() {
-                const notes = State.selectedCase.notes || [];
-                document.getElementById("activity-log").innerHTML = notes.length ? notes.slice().reverse().map(n => `
-                    <div class="p-3 rounded-xl bg-surface-2/20 border border-surface-3/5 text-[10px] leading-relaxed">
-                        <p class="text-slate-400">${n.text}</p>
-                        <div class="mt-2 text-[8px] text-slate-600 font-bold uppercase tracking-tighter">${new Date(n.timestamp).toLocaleString()}</div>
-                    </div>
-                `).join("") : '<p class="text-center py-4 text-[9px] text-slate-700 font-bold uppercase">Empty</p>';
-            },
-
-            renderJobs() {
-                const jobs = Object.values(State.jobs);
-                document.getElementById("job-list").innerHTML = jobs.length ? jobs.map(j => `
-                    <div class="p-3 rounded-xl bg-surface-2/40 border border-surface-3/20">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-[9px] font-bold text-slate-400 uppercase">${j.type}</span>
-                            <span class="text-[8px] font-bold ${j.status === 'completed' ? 'text-emerald-500' : 'text-brand-400 animate-pulse'} uppercase">${j.status}</span>
-                        </div>
-                        <div class="h-1 w-full bg-surface-3 rounded-full overflow-hidden">
-                            <div class="h-full bg-brand-500 transition-all duration-500" style="width: ${j.progress}%"></div>
-                        </div>
-                    </div>
-                `).join("") : '<p class="text-[9px] text-slate-700 text-center py-2 italic font-medium">System Idle</p>';
-            },
-
-            openNewCaseModal() { Actions.toggleModal('new-case-modal', true); },
-            openRAGSearch() { Actions.toggleModal('rag-search-modal', true); },
-            openSystemModal() { Actions.fetchSystemStatus(); Actions.toggleModal('system-modal', true); },
-            openAddNoteModal() { Actions.toggleModal('note-modal', true); },
-            openEditCaseModal() {
-                if (!State.selectedCase) return;
-                document.getElementById("ec-name").value = State.selectedCase.client_name;
-                document.getElementById("ec-matter").value = State.selectedCase.matter_type;
-                Actions.toggleModal('edit-case-modal', true);
-            }
-        };
-
-        async function withBusy(ev, fn) {
-            const btn = ev && ev.currentTarget instanceof HTMLButtonElement ? ev.currentTarget : null;
-            if (btn) {
-                if (btn.disabled) return;
-                btn.disabled = true;
-                btn.classList.add("is-busy");
-            }
-            try { return await fn(); }
-            finally { if (btn) { btn.disabled = false; btn.classList.remove("is-busy"); } }
-        }
-
-        const Actions = {
-            filterCases(query) {
-                State.caseFilter = query;
-                UI.renderCaseList();
-            },
-
-            async refreshAll() {
-                try {
-                    const r = await fetch(`${API}/status`);
-                    State.update(await r.json());
-                } catch (e) { console.warn("refreshAll failed", e); }
-            },
-
-            async selectCase(id) { await State.fetchFullCase(id); },
-
-            async updateCase() {
-                if (!State.selectedCase) return;
-                const name = document.getElementById("ec-name").value.trim();
-                const matter = document.getElementById("ec-matter").value;
-                if (!name) return;
-                try {
-                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}`, {
-                        method: "PUT",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ client_name: name, matter_type: matter })
-                    });
-                    if (r.ok) {
-                        UI.toast("Case updated", "success");
-                        Actions.toggleModal('edit-case-modal', false);
-                        State.fetchFullCase(State.selectedCase.case_id);
-                        Actions.refreshAll();
-                    }
-                } catch (e) { UI.toast("Update failed", "error"); }
-            },
-
-            _lastDocViewUrl: "",
-
-            openDocInNewTab() {
-                const u = this._lastDocViewUrl;
-                if (u) window.open(u, "_blank", "noopener,noreferrer");
-            },
-
-            async viewDocument(filename) {
-                document.getElementById("pdf-title").textContent = filename;
-                const url = `${API}/documents/${encodeURIComponent(filename)}/view`;
-                this._lastDocViewUrl = url;
-                try {
-                    const head = await fetch(url, { method: "HEAD" });
-                    if (!head.ok) {
-                        UI.toast(head.status === 404 ? "File not found or not indexed" : "Could not open document", "error");
-                        return;
-                    }
-                } catch (e) {
-                    UI.toast("Could not reach server for this file", "error");
-                    return;
-                }
-                const frame = document.getElementById("pdf-frame");
-                const img = document.getElementById("doc-preview-img");
-                const textPreview = document.getElementById("doc-preview-text");
-
-                const lower = filename.toLowerCase();
-                const isImage = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(lower);
-                const isText = /\.(docx|txt|md|csv)$/i.test(lower);
-
-                if (isImage) {
-                    frame.classList.add("hidden");
-                    textPreview.classList.add("hidden");
-                    img.classList.remove("hidden");
-                    img.onerror = () => UI.toast("Image preview failed — try Open in tab", "error");
-                    img.src = url;
-                } else if (isText) {
-                    frame.classList.add("hidden");
-                    img.classList.add("hidden");
-                    img.removeAttribute("src");
-                    textPreview.classList.remove("hidden");
-                    textPreview.textContent = "Loading text content...";
-                    try {
-                        const r = await fetch(`${API}/documents/${encodeURIComponent(filename)}/content`);
-                        const d = await r.json();
-                        textPreview.textContent = d.content || "No text content available.";
-                    } catch(e) {
-                        textPreview.textContent = "Failed to load content.";
-                    }
-                } else {
-                    img.classList.add("hidden");
-                    textPreview.classList.add("hidden");
-                    img.removeAttribute("src");
-                    img.onerror = null;
-                    frame.classList.remove("hidden");
-                    frame.src = url;
-                }
-                this.toggleModal('pdf-modal', true);
-            },
-
-            async deleteCase(ev) {
-                if (!State.selectedCase) return;
-                const ok = await openModal({
-                    type: "confirm",
-                    title: "Delete case?",
-                    body: `This will permanently delete the case for ${State.selectedCase.client_name}.`,
-                    intent: "danger",
-                });
-                if (!ok) return;
-                return withBusy(ev, async () => {
-                    try {
-                        const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/delete`, { method: "POST" });
-                        if (r.ok) {
-                            UI.toast("Case deleted", "success");
-                            State.selectedCase = null;
-                            this.refreshAll();
-                        }
-                    } catch (e) { UI.toast("Delete failed", "error"); }
-                });
-            },
-
-            async deleteDocument(caseId, filename) {
-                const ok = await openModal({
-                    type: "confirm",
-                    title: "Delete document?",
-                    body: `Permanently delete ${filename}.`,
-                    intent: "danger",
-                });
-                if (!ok) return;
-                try {
-                    const r = await fetch(`${API}/cases/${caseId}/documents/${encodeURIComponent(filename)}`, { method: "DELETE" });
-                    if (r.ok) {
-                        UI.toast("Document deleted", "success");
-                        State.fetchFullCase(caseId);
-                    } else {
-                        UI.toast("Failed to delete document", "error");
-                    }
-                } catch (e) { UI.toast("Delete failed", "error"); }
-            },
-
-            async createCase() {
-                const name = document.getElementById("nc-name").value.trim();
-                if (!name) return UI.toast("Name required", "error");
-                try {
-                    const r = await fetch(`${API}/cases/create`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ client_name: name, matter_type: document.getElementById("nc-matter").value, initial_msg: document.getElementById("nc-msg").value })
-                    });
-                    const d = await r.json();
-                    UI.toast("Case Created", "success");
-                    this.toggleModal('new-case-modal', false);
-                    this.selectCase(d.case_id);
-                } catch (e) { UI.toast("Creation failed", "error"); }
-            },
-
-            async uploadFiles(e) {
-                const input = e.target;
-                const files = input.files;
-                if (!files || files.length === 0) return;
-                
-                const fd = new FormData();
-                for (let i = 0; i < files.length; i++) {
-                    fd.append("files", files[i]);
-                }
-                if (State.selectedCase) {
-                    fd.append("case_id", State.selectedCase.case_id);
-                }
-                
-                try {
-                    const r = await fetch(`${API}/upload/batch`, { method: "POST", body: fd });
-                    const d = await r.json().catch(() => ({}));
-                    if (!r.ok) {
-                        UI.toast(d.error || `Batch upload failed`, "error");
-                        return;
-                    }
-                    if (d.job_id) {
-                        State.addJob(d.job_id);
-                        UI.toast(`Processing batch of ${files.length} files…`, "info");
-                    } else UI.toast(`Upload accepted but no job_id`, "error");
-                } catch (e) { 
-                    UI.toast(`Upload failed`, "error"); 
-                }
-                input.value = "";
-            },
-
-            async searchRAG() {
-                const q = document.getElementById("rag-query").value.trim();
-                if (!q) return;
-                const resEl = document.getElementById("rag-results");
-                resEl.innerHTML = '<div class="flex justify-center py-8"><div class="animate-spin h-6 w-6 border-2 border-brand-500 border-t-transparent rounded-full"></div></div>';
-                try {
-                    const r = await fetch(`${API}/rag/search`, {
-                        method: "POST",
-                        body: JSON.stringify({ query: q, k: 5 })
-                    });
-                    const d = await r.json().catch(() => ({}));
-                    const results = (d?.results ?? d?.hits) ?? [];
-                    if (!results.length) {
-                        resEl.innerHTML = '<p class="text-center py-8 text-slate-500 text-sm">No matches found.</p>';
-                        return;
-                    }
-                    resEl.innerHTML = results.map(res => `
-                        <div class="p-4 rounded-xl bg-surface-2/50 border border-surface-3/30 space-y-2">
-                            <div class="flex justify-between items-center"><span class="text-[10px] font-bold text-brand-400 uppercase">${res.filename}</span><span class="text-[9px] text-slate-500">${res.score}</span></div>
-                            <p class="text-xs text-slate-300 leading-relaxed">${res.chunk}</p>
-                        </div>
-                    `).join("");
-                } catch (e) { resEl.innerHTML = '<p class="text-rose-500 text-center py-8 text-xs">Search failed.</p>'; }
-            },
-
-            async addNote() {
-                if (!State.selectedCase) return;
-                const text = document.getElementById("note-text").value.trim();
-                if (!text) return;
-                try {
-                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/notes`, {
-                        method: "POST",
-                        body: JSON.stringify({ text })
-                    });
-                    if (r.ok) {
-                        UI.toast("Note added", "success");
-                        document.getElementById("note-text").value = "";
-                        this.toggleModal('note-modal', false);
-                        State.fetchFullCase(State.selectedCase.case_id);
-                    }
-                } catch (e) { UI.toast("Failed to add note", "error"); }
-            },
-
-            async fetchSystemStatus() {
-                try {
-                    const r = await fetch(`${API}/device`);
-                    const d = await r.json();
-                    document.getElementById("sys-platform").textContent = d.platform_id;
-                    document.getElementById("sys-memory").textContent = d.memory_mb + " MB";
-                    document.getElementById("sys-apple").textContent = d.is_apple_silicon ? "Yes" : "No";
-                } catch (e) { console.warn("fetchSystemStatus failed", e); }
-            },
-
-            async advanceState(ev) {
-                if (!State.selectedCase) return;
-                return withBusy(ev, async () => {
-                    try {
-                        const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/advance`, { method: "POST" });
-                        if (!r.ok) {
-                            let msg = "Could not advance";
-                            try {
-                                const d = await r.json();
-                                if (d.error) msg = d.error;
-                            } catch (_) {}
-                            UI.toast(msg, "error");
-                            if (msg.includes("HITL") || msg.includes("approval")) {
-                                UI.toast("Use the Human review panel below to approve or reject.", "info");
-                            }
-                            return;
-                        }
-                        this.refreshAll();
-                    } catch (e) { UI.toast("Could not advance", "error"); }
-                });
-            },
-
-            async submitHITL(approved) {
-                if (!State.selectedCase) return;
-                const hitl = document.getElementById("hitl-panel");
-                const gate = hitl && hitl.dataset.gateState;
-                if (!gate) {
-                    UI.toast("No review gate active.", "error");
-                    return;
-                }
-                const note = document.getElementById("hitl-reason").value.trim();
-                const reason = note || (approved ? "Approved" : "Rejected");
-                try {
-                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/approve`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ state: gate, approved, reason })
-                    });
-                    const d = await r.json().catch(() => ({}));
-                    if (!r.ok) {
-                        UI.toast(d.error || "Review submission failed", "error");
-                        return;
-                    }
-                    UI.toast(approved ? "Review approved" : "Review rejected", approved ? "success" : "info");
-                    document.getElementById("hitl-reason").value = "";
-                    await State.fetchFullCase(State.selectedCase.case_id);
-                    await this.refreshAll();
-                } catch (e) { UI.toast("Review submission failed", "error"); }
-            },
-
-            async generateSummary() {
-                if (!State.selectedCase) return;
-                const el = document.getElementById("case-summary");
-                el.textContent = "AI is analyzing documents...";
-                try {
-                    const r = await fetch(`${API}/cases/${State.selectedCase.case_id}/summarize`, { method: "POST" });
-                    const d = await r.json().catch(() => ({}));
-                    if (!r.ok) {
-                        el.textContent = d?.error || "Summary failed.";
-                        return;
-                    }
-                    el.textContent = d?.summary ?? "No summary returned.";
-                } catch (e) { el.textContent = "Summary failed."; }
-            },
-
-            toggleModal(id, show) {
-                const el = document.getElementById(id);
-                if (id === "pdf-modal" && !show) {
-                    const frame = document.getElementById("pdf-frame");
-                    const img = document.getElementById("doc-preview-img");
-                    frame.src = "";
-                    img.removeAttribute("src");
-                    frame.classList.remove("hidden");
-                    img.classList.add("hidden");
-                    document.getElementById("pdf-title").textContent = "Document Preview";
-                }
-                if (id === "rag-search-modal" && !show) {
-                    document.getElementById("rag-query").value = "";
-                    document.getElementById("rag-results").innerHTML = '<p class="text-center py-8 text-slate-500 text-sm italic">Enter a query to search across all case files.</p>';
-                }
-                el.classList.toggle('hidden', !show);
-                el.classList.toggle('flex', show);
-            }
-        };
-
-        let _wsBackoffMs = WS_BACKOFF_MIN_MS;
-        const _wsBackoffMax = WS_BACKOFF_MAX_MS;
-        let _wsConnected = false;
-
-        async function pollStatusIfWSDead() {
-            if (_wsConnected) return;
-            try {
-                const r = await fetch(`${API}/status`);
-                if (!r.ok) return;
-                const d = await r.json().catch(() => null);
-                if (!d) return;
-                State.update(d);
-                document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-amber-500";
-                document.getElementById("conn-text").textContent = "Live (HTTP)";
-            } catch (e) { console.warn("pollStatusIfWSDead failed", e); }
-        }
-
-        setInterval(pollStatusIfWSDead, HTTP_POLL_INTERVAL_MS);
-        pollStatusIfWSDead();
-
-        document.getElementById("case-list").addEventListener("click", (e) => {
-            const btn = e.target.closest(".case-row-btn[data-case-id]");
-            if (!btn) return;
-            e.preventDefault();
-            const id = btn.getAttribute("data-case-id");
-            if (id) Actions.selectCase(id);
+    // --- Cases (jump + ask) ---
+    state.cases.forEach(c => {
+      const txt = `${c.client_name||''} ${c.case_id} ${c.matter_type||''}`.toLowerCase();
+      if(!q || txt.includes(q)){
+        out.push({
+          label:`${c.client_name||'(unnamed)'}`,
+          meta:c.case_id, ic:'📁', section:'Cases',
+          do:()=>{ chatCase.value = c.case_id; gotoView('chat'); chatInput.focus(); }
         });
+      }
+    });
 
-        document.getElementById("document-list").addEventListener("click", (e) => {
-            const card = e.target.closest(".doc-card[data-doc-name]");
-            if (!card) return;
-            e.preventDefault();
-            const name = card.getAttribute("data-doc-name");
-            if (name) Actions.viewDocument(name);
+    // --- Documents (open in viewer) ---
+    state.docs.forEach(d => {
+      const f = d.filename || d.name || '';
+      if(!q || f.toLowerCase().includes(q)){
+        out.push({
+          label:f, meta:`${d.chunks||0} chunks`, ic:'📄', section:'Documents',
+          do:()=>window.open(`${API}/documents/${encodeURIComponent(f)}/view`,'_blank')
         });
+      }
+    });
 
-        document.getElementById("document-list").addEventListener("keydown", (e) => {
-            if (e.key !== "Enter" && e.key !== " ") return;
-            const card = e.target.closest(".doc-card[data-doc-name]");
-            if (!card) return;
-            e.preventDefault();
-            const name = card.getAttribute("data-doc-name");
-            if (name) Actions.viewDocument(name);
-        });
+    // --- Ask AI passthrough ---
+    if(q){
+      out.unshift({
+        label:`Ask AI: "${query}"`, meta:'⏎', ic:'✨', section:'Ask',
+        do:()=>{ gotoView('chat'); chatInput.value = query; sendChat(); }
+      });
+    }
 
-        function connectWS() {
-            const ws = new WebSocket((location.protocol === "https:" ? "wss:" : "ws:") + "//" + location.host + "/ws");
-            ws.onopen = () => {
-                _wsConnected = true;
-                _wsBackoffMs = WS_BACKOFF_MIN_MS;
-                document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-emerald-500 pulse-dot";
-                document.getElementById("conn-text").textContent = "Connected";
-                Actions.refreshAll();
-            };
-            ws.onmessage = (e) => {
-                try {
-                    const payload = JSON.parse(e.data);
-                    State.update(payload);
-                } catch (err) {
-                    console.warn("WebSocket message parse error", err);
-                }
-            };
-            ws.onerror = () => {
-                document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-yellow-500";
-                document.getElementById("conn-text").textContent = "Error";
-            };
-            ws.onclose = () => {
-                _wsConnected = false;
-                document.getElementById("conn-dot").className = "h-1.5 w-1.5 rounded-full bg-rose-500";
-                document.getElementById("conn-text").textContent = "Reconnecting…";
-                pollStatusIfWSDead();
-                setTimeout(connectWS, _wsBackoffMs);
-                _wsBackoffMs = Math.min(_wsBackoffMax, Math.floor(_wsBackoffMs * 1.5));
-            };
-        }
+    // --- Actions ---
+    const acts = [
+      {label:'New case', ic:'➕', do:()=>$('#case-new').click()},
+      {label:'Upload document', ic:'⬆️', do:()=>{ gotoView('docs'); setTimeout(()=>$('#file-input').click(),120); }},
+      {label:'Clear conversation', ic:'🗑', do:()=>$('#chat-clear').click()},
+      {label:'Refresh cases', ic:'↻', do:loadCases},
+    ];
+    acts.forEach(a=>{
+      if(!q || a.label.toLowerCase().includes(q)) out.push({...a, section:'Actions'});
+    });
 
-        connectWS();
-    </script>
+    return out.slice(0, 30);
+  }
+
+  function render(){
+    let html = '';
+    let lastSection = null;
+    items.forEach((it,i)=>{
+      if(it.section !== lastSection){
+        html += `<div class="cmdk-section">${esc(it.section)}</div>`;
+        lastSection = it.section;
+      }
+      html += `<div class="cmdk-item${i===activeIdx?' active':''}" data-i="${i}">
+        <span class="ic">${it.ic||'•'}</span>
+        <span>${esc(it.label)}</span>
+        ${it.meta?`<span class="meta">${esc(it.meta)}</span>`:''}
+      </div>`;
+    });
+    if(!items.length) html = `<div class="cmdk-empty">No matches</div>`;
+    listEl.innerHTML = html;
+    listEl.querySelectorAll('.cmdk-item').forEach(el=>{
+      el.addEventListener('click', ()=>{ activeIdx = +el.dataset.i; commit(); });
+      el.addEventListener('mouseenter', ()=>{ activeIdx = +el.dataset.i; updateActive(); });
+    });
+  }
+  function updateActive(){
+    listEl.querySelectorAll('.cmdk-item').forEach((el,i)=>el.classList.toggle('active', i===activeIdx));
+    const cur = listEl.querySelector('.cmdk-item.active');
+    if(cur) cur.scrollIntoView({block:'nearest'});
+  }
+  function commit(){
+    const it = items[activeIdx]; close();
+    if(it && it.do) it.do();
+  }
+  function open(){
+    if(backdrop) return;
+    backdrop = document.createElement('div');
+    backdrop.className = 'cmdk-backdrop';
+    backdrop.innerHTML = `
+      <div class="cmdk" role="dialog" aria-label="Command palette">
+        <input class="cmdk-input" placeholder="Search cases, documents, or ask AI…" />
+        <div class="cmdk-list"></div>
+        <div class="cmdk-foot">
+          <span><span class="kbd">↑↓</span> navigate</span>
+          <span><span class="kbd">⏎</span> open</span>
+          <span><span class="kbd">esc</span> close</span>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    input = backdrop.querySelector('.cmdk-input');
+    listEl = backdrop.querySelector('.cmdk-list');
+    items = buildItems(''); activeIdx = 0; render();
+    input.focus();
+    input.addEventListener('input', ()=>{ items = buildItems(input.value); activeIdx = 0; render(); });
+  }
+  function close(){ if(backdrop){ backdrop.remove(); backdrop=null; } }
+  document.addEventListener('keydown', e=>{
+    const isMeta = e.metaKey || e.ctrlKey;
+    if(isMeta && e.key.toLowerCase()==='k'){ e.preventDefault(); backdrop?close():open(); return; }
+    if(!backdrop) return;
+    if(e.key==='Escape'){ e.preventDefault(); close(); }
+    else if(e.key==='ArrowDown'){ e.preventDefault(); activeIdx = Math.min(items.length-1, activeIdx+1); updateActive(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); activeIdx = Math.max(0, activeIdx-1); updateActive(); }
+    else if(e.key==='Enter'){ e.preventDefault(); commit(); }
+  });
+  return { open, close };
+})();
+$('#cmdk-trigger').addEventListener('click', cmdk.open);
+
+/* ============================================================
+   Boot
+   ============================================================ */
+(async ()=>{
+  await loadCases().catch(()=>{});
+  await loadDocs().catch(()=>{});
+  await loadSettings().catch(()=>{});
+  openWS();
+  chatInput.focus();
+})();
+</script>
 </body>
 </html>
