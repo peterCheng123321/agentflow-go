@@ -49,7 +49,6 @@ struct CaseHubView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Color.black.opacity(0.12))
         .task(id: caseID) { await load() }
         .onChange(of: router.pendingCaseResearchFocus) { _, id in
             guard id == caseID else { return }
@@ -197,7 +196,6 @@ struct CaseHubView: View {
             }
         }
         .padding(AF.Space.l)
-        .background(.thinMaterial)
     }
 
     // MARK: - Vertical stepper
@@ -256,7 +254,6 @@ struct CaseHubView: View {
             }
             .padding(AF.Space.m)
         }
-        .background(Color.black.opacity(0.15))
     }
 
     // MARK: - Tabs

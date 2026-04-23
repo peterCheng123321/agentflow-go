@@ -160,15 +160,7 @@ struct SidebarView: View {
             }
             .padding(AF.Space.m)
         }
-        .background(
-            ZStack {
-                Color(red: 0.05, green: 0.03, blue: 0.10)
-                Rectangle().fill(.ultraThinMaterial).opacity(0.55)
-            }
-        )
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(Color.white.opacity(0.06)).frame(width: 1)
-        }
+        .background(.regularMaterial)
     }
 
     private var emptyListHint: String {
