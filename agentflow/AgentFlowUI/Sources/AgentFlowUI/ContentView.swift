@@ -1,328 +1,181 @@
 import SwiftUI
 
-enum NavItem: String, CaseIterable, Identifiable {
-    case cases    = "Cases"
-    case agent    = "Agent"
-    case jobs     = "Jobs"
-    case settings = "Settings"
-
-    var id: String { rawValue }
-
-    var icon: String {
-        switch self {
-        case .cases:    return "folder.fill"
-        case .agent:    return "sparkles"
-        case .jobs:     return "square.stack.3d.up"
-        case .settings: return "gear"
-        }
-    }
-}
-
 struct ContentView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var backend: BackendManager
-    @State private var selection: NavItem = .cases
-    @State private var selectedCaseID: String? = nil
+    @EnvironmentObject var ai: AIController
+    @EnvironmentObject var router: AppRouter
+
+    @State private var cases: [Case] = []
+    @State private var selection: String?
+    @State private var search: String = ""
+    @State private var refreshTick = 0
 
     var body: some View {
         HStack(spacing: 0) {
-            // Column 1 — dark sidebar
-            SidebarView(selection: $selection)
-                .frame(width: 220)
-
-            Divider()
-
-            // Column 2 — case list (only for Cases tab)
-            if selection == .cases {
-                CaseListColumn(selectedCaseID: $selectedCaseID)
-                    .frame(width: 300)
-                Divider()
-            }
-
-            // Column 3 — detail / content area
-            Group {
-                switch selection {
-                case .cases:
-                    if let id = selectedCaseID {
-                        CaseDetailView(caseID: id)
-                            .id(id)
-                    } else {
-                        EmptyStateView(
-                            icon: "folder.open",
-                            title: "Select a Case",
-                            subtitle: "Pick a case from the list to view details, documents, and AI analysis."
-                        )
-                    }
-                case .agent:
-                    AgentView()
-                case .jobs:
-                    JobsView()
-                case .settings:
-                    SettingsView()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(AF.Color.detailBg)
-        }
-        .frame(minWidth: 900, minHeight: 600)
-        .alert("Backend Error", isPresented: .constant(backend.startError != nil)) {
-            Button("OK") { backend.startError = nil }
-        } message: {
-            Text(backend.startError ?? "")
-        }
-    }
-}
-
-// MARK: - Sidebar
-
-struct SidebarView: View {
-    @Binding var selection: NavItem
-    @EnvironmentObject var api: APIClient
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // App header
-            HStack(spacing: AF.Spacing.sm) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(AF.Color.accent)
-                        .frame(width: 30, height: 30)
-                    Image(systemName: "scalemass.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("AgentFlow")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(AF.Color.sidebarText)
-                    Text("Legal AI Platform")
-                        .font(.system(size: 10))
-                        .foregroundStyle(AF.Color.sidebarTextSub)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, AF.Spacing.md)
-            .padding(.top, AF.Spacing.lg)
-            .padding(.bottom, AF.Spacing.md)
-
-            Rectangle()
-                .fill(AF.Color.sidebarDivider)
-                .frame(height: 1)
-                .padding(.horizontal, AF.Spacing.md)
-
-            // Nav items
-            VStack(spacing: 2) {
-                ForEach(NavItem.allCases) { item in
-                    SidebarRow(item: item, isSelected: selection == item)
-                        .onTapGesture {
-                            withAnimation(.spring(duration: 0.2)) { selection = item }
-                        }
-                }
-            }
-            .padding(.horizontal, AF.Spacing.sm)
-            .padding(.top, AF.Spacing.sm)
-
-            Spacer()
-
-            // Bottom status
-            VStack(spacing: AF.Spacing.sm) {
-                Rectangle()
-                    .fill(AF.Color.sidebarDivider)
-                    .frame(height: 1)
-
-                HStack(spacing: AF.Spacing.sm) {
-                    ConnectionDot(connected: api.connected)
-                    Spacer()
-                    if let rag = api.ragSummary {
-                        HStack(spacing: 4) {
-                            Image(systemName: "doc.text.magnifyingglass")
-                                .font(.system(size: 10))
-                                .foregroundStyle(AF.Color.sidebarTextSub)
-                            Text("\(rag.documentCount) docs")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(AF.Color.sidebarTextSub)
-                        }
-                    }
-                }
-                .padding(.horizontal, AF.Spacing.md)
-                .padding(.bottom, AF.Spacing.md)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AF.Color.sidebarBg)
-    }
-}
-
-struct SidebarRow: View {
-    var item: NavItem
-    var isSelected: Bool
-
-    var body: some View {
-        HStack(spacing: 0) {
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(isSelected ? AF.Color.accent : Color.clear)
-                .frame(width: 3)
-
-            HStack(spacing: AF.Spacing.sm) {
-                Image(systemName: item.icon)
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: 18)
-                    .foregroundStyle(isSelected ? AF.Color.accent : AF.Color.sidebarTextSub)
-                Text(item.rawValue)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? AF.Color.sidebarText : AF.Color.sidebarTextSub)
-                Spacer()
-            }
-            .padding(.leading, AF.Spacing.sm)
-            .padding(.trailing, AF.Spacing.sm)
-            .padding(.vertical, 9)
-            .background(
-                isSelected ? AF.Color.sidebarSelected : Color.clear,
-                in: RoundedRectangle(cornerRadius: AF.Radius.chip, style: .continuous)
+            SidebarView(
+                cases: $cases,
+                selection: $selection,
+                search: $search,
+                onRefresh: { await loadCases() },
+                onNew: { router.open(.newCase) }
             )
-        }
-        .contentShape(Rectangle())
-        .accessibilityLabel(item.rawValue)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
-}
-
-// MARK: - Jobs View
-
-struct JobsView: View {
-    @EnvironmentObject var api: APIClient
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Background Jobs")
-                    .font(.system(size: 15, weight: .bold))
-                Spacer()
-                Text("\(api.jobs.count) active")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, AF.Spacing.md)
-            .padding(.top, AF.Spacing.md)
-
-            ZStack {
-                if api.jobs.isEmpty {
-                    EmptyStateView(icon: "square.stack.3d.up", title: "No Active Jobs", subtitle: "Upload documents or run the agent to see background tasks here.")
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: AF.Spacing.sm) {
-                            ForEach(api.jobs.sorted(by: { $0.createdAt > $1.createdAt })) { job in
-                                JobRow(job: job)
-                            }
-                        }
-                        .padding(AF.Spacing.md)
+            .overlay(alignment: .bottom) {
+                HStack(spacing: 8) {
+                    Button { router.open(.settings) } label: {
+                        Image(systemName: "gear")
                     }
+                    .buttonStyle(.afGhost)
+                    .help("Settings")
+
+                    Button { router.toggleInspector() } label: {
+                        Image(systemName: router.inspectorOpen ? "sidebar.trailing" : "sparkles")
+                            .foregroundStyle(router.inspectorOpen ? .primary : AF.Palette.tint(.purple))
+                    }
+                    .buttonStyle(.afGhost)
+                    .help(router.inspectorOpen ? "Hide AI (⌘⌥I)" : "Show AI (⌘⌥I)")
+                    .keyboardShortcut("i", modifiers: [.command, .option])
+
+                    Spacer()
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 7, height: 7)
+                    Text(statusLabel)
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, AF.Space.m)
+                .padding(.vertical, AF.Space.s)
+            }
+
+            Divider().opacity(0.2)
+
+            Group {
+                if let sel = selection, let c = cases.first(where: { $0.case_id == sel }) {
+                    CaseDetailView(caseID: c.case_id, onChanged: { await loadCases() })
+                        .id(c.case_id)
+                } else {
+                    EmptyStateView(
+                        icon: "folder",
+                        title: "Select a case",
+                        subtitle: "Pick a case from the sidebar, or click + to create one."
+                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if router.inspectorOpen {
+                Divider().opacity(0.2)
+                AIInspector(caseID: selection)
+                    .frame(width: 340)
+            }
+        }
+        .background(AmbientBackground())
+        .task { await loadCases() }
+        .onChange(of: selection) { _, new in ai.bind(toCase: new) }
+        .onReceive(Timer.publish(every: 6, on: .main, in: .common).autoconnect()) { _ in
+            Task { await loadCases() }
+        }
+        // Single hoisted sheet — any child calls `router.open(...)`.
+        .sheet(item: $router.sheet) { sheet in
+            switch sheet {
+            case .document(let name, let caseID):
+                DocumentViewer(filename: name, caseID: caseID,
+                               onDeleted: { await loadCases() })
+                    .environmentObject(api)
+            case .settings:
+                SettingsSheet()
+                    .environmentObject(backend)
+            case .newCase:
+                NewCaseSheet { await loadCases() }
+                    .environmentObject(api)
+            case .modelPicker:
+                ModelPickerSheet()
+                    .environmentObject(api)
+                    .environmentObject(ai)
+            }
         }
     }
-}
 
-struct JobRow: View {
-    var job: AFJob
-
+    private var statusLabel: String {
+        switch backend.status {
+        case .starting: return "Starting…"
+        case .running:  return "Online"
+        case .failed:   return "Offline"
+        }
+    }
     private var statusColor: Color {
-        switch job.status {
-        case "completed":  return AF.Color.accentGreen
-        case "failed":     return AF.Color.accentRed
-        case "processing": return AF.Color.accent
-        default:           return .secondary
+        switch backend.status {
+        case .starting: return .orange
+        case .running:  return .green
+        case .failed:   return .red
         }
     }
 
-    var body: some View {
-        HStack(spacing: AF.Spacing.md) {
-            ProgressRing(progress: Double(job.progress) / 100.0, size: 36, color: statusColor)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(job.type.replacingOccurrences(of: "_", with: " ").capitalized)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(job.error.isEmpty ? job.status : "Failed: \(job.error)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(job.error.isEmpty ? .secondary : AF.Color.accentRed)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            Text("\(job.progress)%")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(statusColor)
+    private func loadCases() async {
+        do {
+            cases = try await api.listCases()
+            if selection == nil, let first = cases.first { selection = first.case_id }
+        } catch {
+            // swallow — backend may still be starting
         }
-        .glassCard(padding: AF.Spacing.md)
-        .accessibilityLabel("\(job.type) job, \(job.status), \(job.progress) percent complete")
     }
 }
 
-// MARK: - Settings View
+// MARK: - Model picker as full sheet (alternative to inline menu)
 
-struct SettingsView: View {
+struct ModelPickerSheet: View {
     @EnvironmentObject var api: APIClient
+    @EnvironmentObject var ai: AIController
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: AF.Spacing.md) {
-                Text("Settings")
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .leading, spacing: AF.Spacing.sm) {
-                    SectionHeader(title: "Connection")
-                    HStack {
-                        Text("Backend URL")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(api.baseURL)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.primary)
-                    }
-                    HStack {
-                        Text("Status")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        ConnectionDot(connected: api.connected)
-                    }
+        VStack(alignment: .leading, spacing: AF.Space.m) {
+            HStack {
+                Label("Select model", systemImage: "cpu").font(.headline)
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
                 }
-                .glassCard()
-
-                if let rag = api.ragSummary {
-                    VStack(alignment: .leading, spacing: AF.Spacing.sm) {
-                        SectionHeader(title: "Knowledge Base")
-                        InfoRow(label: "Documents", value: "\(rag.documentCount)")
-                        InfoRow(label: "Chunks", value: "\(rag.totalChunks)")
-                        InfoRow(label: "Backend", value: rag.backendMode.uppercased())
-                    }
-                    .glassCard()
-                }
-
-                VStack(alignment: .leading, spacing: AF.Spacing.sm) {
-                    SectionHeader(title: "System")
-                    InfoRow(label: "Platform", value: "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
-                    InfoRow(label: "App Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")
-                }
-                .glassCard()
+                .buttonStyle(.plain)
             }
-            .padding(AF.Spacing.md)
-        }
-    }
-}
 
-struct InfoRow: View {
-    var label: String
-    var value: String
-
-    var body: some View {
-        HStack {
-            Text(label).font(.system(size: 13)).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary)
+            ScrollView {
+                VStack(spacing: AF.Space.s) {
+                    ForEach(ai.models) { m in
+                        Button {
+                            ai.selectedModelID = m.id
+                            dismiss()
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: m.id == ai.selectedModelID ? "largecircle.fill.circle" : "circle")
+                                    .foregroundStyle(m.id == ai.selectedModelID ? AF.Palette.tint(.blue) : .secondary)
+                                    .padding(.top, 2)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(m.name).font(.callout.weight(.semibold))
+                                    if let d = m.description, !d.isEmpty {
+                                        Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                                    }
+                                    if let b = m.backend {
+                                        Text(b.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
+                                    .fill(m.id == ai.selectedModelID
+                                          ? AF.Palette.tint(.blue).opacity(0.12)
+                                          : Color.white.opacity(0.04))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
+        .padding(AF.Space.l)
+        .frame(minWidth: 520, minHeight: 420)
+        .task { await ai.loadModelsIfNeeded(api: api) }
     }
 }
