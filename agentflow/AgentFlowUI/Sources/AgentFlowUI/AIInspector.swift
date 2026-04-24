@@ -89,12 +89,18 @@ struct AIInspector: View {
 
     @ViewBuilder private var modelPicker: some View {
         Menu {
-            ForEach(ai.models) { m in
-                Button { ai.selectedModelID = m.id } label: {
-                    HStack {
-                        Text(m.name)
-                        if m.id == ai.selectedModelID {
-                            Spacer(); Image(systemName: "checkmark")
+            let grouped = Dictionary(grouping: ai.models) { ($0.backend ?? "other").lowercased() }
+            ForEach(grouped.keys.sorted(), id: \.self) { provider in
+                Section(providerLabel(provider)) {
+                    ForEach(grouped[provider] ?? []) { m in
+                        Button {
+                            ai.selectedModelID = m.id
+                        } label: {
+                            if m.id == ai.selectedModelID {
+                                Label(m.name, systemImage: "checkmark")
+                            } else {
+                                Text(m.name)
+                            }
                         }
                     }
                 }
@@ -102,21 +108,43 @@ struct AIInspector: View {
             if ai.models.isEmpty {
                 Text("No models available").foregroundStyle(.secondary)
             }
-        } label: {
-            HStack(spacing: 3) {
-                Image(systemName: "cpu").font(.system(size: 10))
-                Text(ai.selectedModel?.name ?? "Model")
-                    .font(.caption)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down").font(.system(size: 8))
+            Divider()
+            Button {
+                router.open(.modelPicker)
+            } label: {
+                Label("Browse all models…", systemImage: "slider.horizontal.3")
             }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 7).padding(.vertical, 4)
-            .background(Capsule().fill(Color.white.opacity(0.06)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "cpu")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AF.Palette.tint(.blue))
+                Text(ai.selectedModel?.name ?? "Choose model")
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, AF.Space.s)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(AF.Palette.surface))
+            .overlay(Capsule().strokeBorder(AF.Palette.separator, lineWidth: 1))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .help(ai.selectedModel?.description ?? "Select the model that powers research")
+    }
+
+    private func providerLabel(_ raw: String) -> String {
+        switch raw {
+        case "anthropic": return "Anthropic"
+        case "openai":    return "OpenAI"
+        case "google":    return "Google"
+        case "ollama", "local": return "Local"
+        default: return raw.capitalized
+        }
     }
 
     // MARK: - Transcript
