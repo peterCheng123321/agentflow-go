@@ -1,0 +1,31 @@
+[
+  {"prompt": "What's the deadline for case 12345?", "label": "NEEDS_TOOLS"},
+  {"prompt": "When is the next hearing for case 8847?", "label": "NEEDS_TOOLS"},
+  {"prompt": "Show me all my pending tasks", "label": "NEEDS_TOOLS"},
+  {"prompt": "Schedule a client meeting tomorrow at 3pm", "label": "NEEDS_TOOLS"},
+  {"prompt": "Mark case 5567 as closed", "label": "NEEDS_TOOLS"},
+  {"prompt": "Email the contract draft to chen@example.com", "label": "NEEDS_TOOLS"},
+  {"prompt": "案件12345的截止日期是什么时候？", "label": "NEEDS_TOOLS"},
+  {"prompt": "查找张三的案件状态", "label": "NEEDS_TOOLS"},
+  {"prompt": "把案件5567标记为已结案", "label": "NEEDS_TOOLS"},
+
+  {"prompt": "Summarize the liability clauses in this contract", "label": "NEEDS_RAG"},
+  {"prompt": "What does the rental agreement say about late fees?", "label": "NEEDS_RAG"},
+  {"prompt": "Find all references to indemnification in the case files", "label": "NEEDS_RAG"},
+  {"prompt": "Compare the warranty terms in these two agreements", "label": "NEEDS_RAG"},
+  {"prompt": "What evidence supports the plaintiff's negligence claim?", "label": "NEEDS_RAG"},
+  {"prompt": "Explain how 'force majeure' is defined in this contract", "label": "NEEDS_RAG"},
+  {"prompt": "总结合同中关于保密条款的内容", "label": "NEEDS_RAG"},
+  {"prompt": "这份判决书的主要观点是什么？", "label": "NEEDS_RAG"},
+  {"prompt": "在案件文件中找出所有提到违约金的段落", "label": "NEEDS_RAG"},
+
+  {"prompt": "Hi, how are you?", "label": "CONVERSATIONAL"},
+  {"prompt": "Thanks for your help!", "label": "CONVERSATIONAL"},
+  {"prompt": "What can you help me with?", "label": "CONVERSATIONAL"},
+  {"prompt": "Good morning", "label": "CONVERSATIONAL"},
+  {"prompt": "你好", "label": "CONVERSATIONAL"},
+  {"prompt": "你能做什么？", "label": "CONVERSATIONAL"},
+  {"prompt": "谢谢", "label": "CONVERSATIONAL"},
+  {"prompt": "How does this app work?", "label": "CONVERSATIONAL"},
+  {"prompt": "Tell me about yourself", "label": "CONVERSATIONAL"}
+]

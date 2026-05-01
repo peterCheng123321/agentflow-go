@@ -11,24 +11,36 @@ import (
 )
 
 type Config struct {
-	Port              int
-	ModelName         string
-	MaxCases          int
-	DataDir           string
-	MaxConcurrent     int
-	OCRModelID        string
-	MaxMemoryMB       int
-	OllamaURL         string
-	IsAppleSilicon    bool
-	LLMBackend        string // dashscope | mlx | ollama
-	DashScopeBaseURL  string
-	DashScopeAPIKey   string // never log; pass only to LLM provider
-	LLMCacheEnabled   bool
-	LLMCacheDir       string
+	Port             int
+	ModelName        string
+	MaxCases         int
+	DataDir          string
+	MaxConcurrent    int
+	OCRModelID       string
+	MaxMemoryMB      int
+	OllamaURL        string
+	IsAppleSilicon   bool
+	LLMBackend       string // dashscope | deepseek | mlx | ollama
+	DashScopeBaseURL string
+	DashScopeAPIKey  string // never log; pass only to LLM provider
+	DeepSeekBaseURL  string
+	DeepSeekAPIKey   string
+	LLMCacheEnabled  bool
+	LLMCacheDir      string
 	// Model routing for different task types
-	ModelOCR          string // Vision model for OCR (default: qwen-vl-ocr-latest)
-	ModelComplex      string // High-end model for complex reasoning (default: qwen-plus)
-	ModelMedium       string // Mid-tier model for summaries, classification (default: qwen-turbo)
+	ModelOCR           string // Vision model for OCR (default: qwen-vl-ocr-latest)
+	ModelComplex       string // High-end model for complex reasoning (default: qwen-plus)
+	ModelMedium        string // Mid-tier model for summaries, classification (default: qwen-turbo)
+	RouterEnabled      bool
+	RouterModel        string
+	RouterPort         int
+	EmbedRouterEnabled bool
+	EmbedModel         string
+	EmbedServerPort    int
+	EmbedServerHost    string
+	EmbedServerPython  string
+	EmbedServerScript  string
+	EmbedRouterMargin  float64
 }
 
 func Load() *Config {
@@ -64,7 +76,7 @@ func Load() *Config {
 	// AGENTFLOW_LLM_BACKEND: dashscope | ollama | mlx (default dashscope)
 	llmBackend := strings.ToLower(strings.TrimSpace(os.Getenv("AGENTFLOW_LLM_BACKEND")))
 	switch llmBackend {
-	case "dashscope", "ollama", "mlx":
+	case "dashscope", "ollama", "mlx", "deepseek":
 	default:
 		if llmBackend != "" {
 			log.Printf("[config] unknown AGENTFLOW_LLM_BACKEND %q, using dashscope", os.Getenv("AGENTFLOW_LLM_BACKEND"))
@@ -101,10 +113,10 @@ func Load() *Config {
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
 	}
-	
+
 	maxMem := detectPhysicalMemory()
 	if maxMem == 0 {
-		maxMem = 4096 
+		maxMem = 4096
 	}
 
 	modelName := strings.TrimSpace(os.Getenv("AGENTFLOW_MODEL"))
@@ -143,24 +155,45 @@ func Load() *Config {
 		llmCacheDir = v
 	}
 
+	routerModel := strings.TrimSpace(os.Getenv("AGENTFLOW_ROUTER_MODEL"))
+	if routerModel == "" {
+		routerModel = "mlx-community/Qwen3-1.7B-4bit"
+	}
+	embedModel := strings.TrimSpace(os.Getenv("AGENTFLOW_EMBED_MODEL"))
+	if embedModel == "" {
+		embedModel = "mlx-community/multilingual-e5-small-mlx"
+	}
+
 	return &Config{
-		Port:             port,
-		ModelName:        modelName,
-		MaxCases:         maxCases,
-		DataDir:          dataDir,
-		MaxConcurrent:    maxConcurrent,
-		OCRModelID:       ocrModelID,
-		MaxMemoryMB:      maxMem,
-		OllamaURL:        getEnv("OLLAMA_URL", "http://localhost:11434"),
-		IsAppleSilicon:   isAS,
-		LLMBackend:       llmBackend,
-		DashScopeBaseURL: dashBase,
-		DashScopeAPIKey:  dashKey,
-		LLMCacheEnabled:  llmCacheEnabled,
-		LLMCacheDir:      llmCacheDir,
-		ModelOCR:         modelOCR,
-		ModelComplex:     modelComplex,
-		ModelMedium:      modelMedium,
+		Port:               port,
+		ModelName:          modelName,
+		MaxCases:           maxCases,
+		DataDir:            dataDir,
+		MaxConcurrent:      maxConcurrent,
+		OCRModelID:         ocrModelID,
+		MaxMemoryMB:        maxMem,
+		OllamaURL:          getEnv("OLLAMA_URL", "http://localhost:11434"),
+		IsAppleSilicon:     isAS,
+		LLMBackend:         llmBackend,
+		DashScopeBaseURL:   dashBase,
+		DashScopeAPIKey:    dashKey,
+		DeepSeekBaseURL:    strings.TrimSuffix(getEnv("AGENTFLOW_DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"), "/"),
+		DeepSeekAPIKey:     strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")),
+		LLMCacheEnabled:    llmCacheEnabled,
+		LLMCacheDir:        llmCacheDir,
+		ModelOCR:           modelOCR,
+		ModelComplex:       modelComplex,
+		ModelMedium:        modelMedium,
+		RouterEnabled:      envBool("AGENTFLOW_ROUTER_ENABLED", false),
+		RouterModel:        routerModel,
+		RouterPort:         envInt("AGENTFLOW_ROUTER_PORT", 8092),
+		EmbedRouterEnabled: envBool("AGENTFLOW_EMBED_ROUTER_ENABLED", isAS),
+		EmbedModel:         embedModel,
+		EmbedServerPort:    envInt("AGENTFLOW_EMBED_SERVER_PORT", 8090),
+		EmbedServerHost:    getEnv("AGENTFLOW_EMBED_SERVER_HOST", "127.0.0.1"),
+		EmbedServerPython:  getEnv("AGENTFLOW_EMBED_SERVER_PYTHON", "python3"),
+		EmbedServerScript:  strings.TrimSpace(os.Getenv("AGENTFLOW_EMBED_SERVER_SCRIPT")),
+		EmbedRouterMargin:  envFloat("AGENTFLOW_EMBED_ROUTER_MARGIN", 0.05),
 	}
 }
 
@@ -201,6 +234,41 @@ func detectPhysicalMemory() int {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	switch v {
+	case "":
+		return fallback
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		log.Printf("[config] invalid %s=%q, using %v", key, os.Getenv(key), fallback)
+		return fallback
+	}
+}
+
+func envInt(key string, fallback int) int {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+		log.Printf("[config] invalid %s=%q, using %d", key, v, fallback)
+	}
+	return fallback
+}
+
+func envFloat(key string, fallback float64) float64 {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+		log.Printf("[config] invalid %s=%q, using %.3f", key, v, fallback)
 	}
 	return fallback
 }

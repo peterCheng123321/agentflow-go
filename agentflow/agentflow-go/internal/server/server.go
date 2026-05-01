@@ -13,7 +13,11 @@ import (
 	"time"
 
 	"agentflow-go/internal/config"
+	"agentflow-go/internal/embedrouter"
+	"agentflow-go/internal/embedserver"
 	"agentflow-go/internal/llm"
+	"agentflow-go/internal/llmutil"
+	"agentflow-go/internal/mlxserver"
 	"agentflow-go/internal/model"
 	"agentflow-go/internal/ocr"
 	"agentflow-go/internal/processor"
@@ -25,21 +29,29 @@ import (
 )
 
 type Server struct {
-	cfg        *config.Config
-	llm        *llm.Provider
-	ocr        *ocr.Engine
-	rag        *rag.Manager
-	workflow   *workflow.Engine
-	mux        *http.ServeMux
-	upgrader   websocket.Upgrader
-	clients    map[*websocket.Conn]bool
-	clientsMu  sync.Mutex
-	jobs       map[string]*model.Job
-	jobsMu     sync.RWMutex
-	wsWriteMu  sync.Mutex
-	workerPool *worker.Pool
-	processor  *processor.BatchProcessor
-	startTime  time.Time
+	cfg            *config.Config
+	llm            *llm.Provider
+	ocr            *ocr.Engine
+	rag            *rag.Manager
+	workflow       *workflow.Engine
+	mux            *http.ServeMux
+	upgrader       websocket.Upgrader
+	clients        map[*websocket.Conn]bool
+	clientsMu      sync.Mutex
+	jobs           map[string]*model.Job
+	jobsMu         sync.RWMutex
+	wsWriteMu      sync.Mutex
+	workerPool     *worker.Pool
+	processor      *processor.BatchProcessor
+	startTime      time.Time
+	ocrCache       *ocrCache
+	router         *llm.Provider
+	routerMgr      *mlxserver.Manager
+	embedRouter    *embedrouter.Router
+	embedMgr       *embedserver.Manager
+	embedReadyMu   sync.Mutex
+	embedReady     bool
+	shutdownCancel context.CancelFunc
 }
 
 func New(cfg *config.Config) *Server {
@@ -51,6 +63,7 @@ func New(cfg *config.Config) *Server {
 		cfg:       cfg,
 		mux:       http.NewServeMux(),
 		startTime: time.Now(),
+		ocrCache:  newOCRCache(cfg.DataDir),
 		clients:   make(map[*websocket.Conn]bool),
 		jobs:      make(map[string]*model.Job),
 		upgrader: websocket.Upgrader{
@@ -61,6 +74,8 @@ func New(cfg *config.Config) *Server {
 			},
 		},
 	}
+	srvCtx, shutdownCancel := context.WithCancel(context.Background())
+	s.shutdownCancel = shutdownCancel
 
 	if cfg.LLMBackend == "dashscope" && cfg.DashScopeAPIKey == "" {
 		log.Fatal("LLM backend is dashscope but no API key: set AGENTFLOW_DASHSCOPE_API_KEY or DASHSCOPE_API_KEY, AGENTFLOW_DASHSCOPE_API_KEY_FILE, or create data/secrets/dashscope_api_key.txt (see data/secrets/dashscope_api_key.txt.example)")
@@ -74,6 +89,9 @@ func New(cfg *config.Config) *Server {
 	case "dashscope":
 		s.llm = llm.NewProvider(cfg.ModelName, cfg.DashScopeBaseURL, cfg.DashScopeAPIKey, llm.BackendOpenAICompat, llmOpts...)
 		s.ocr = ocr.NewEngine(cfg.OCRModelID, cfg.DashScopeBaseURL, cfg.DashScopeAPIKey, ocr.BackendOpenAICompat, cfg.MaxConcurrent, 10*time.Minute)
+	case "deepseek":
+		s.llm = llm.NewProvider(cfg.ModelName, cfg.DeepSeekBaseURL, cfg.DeepSeekAPIKey, llm.BackendOpenAICompat, llmOpts...)
+		s.ocr = ocr.NewEngine(cfg.OCRModelID, cfg.OllamaURL, "", ocr.BackendOllama, cfg.MaxConcurrent, 5*time.Minute)
 	default:
 		s.llm = llm.NewProvider(cfg.ModelName, cfg.OllamaURL, "", llm.BackendOllama, llmOpts...)
 		s.ocr = ocr.NewEngine(cfg.OCRModelID, cfg.OllamaURL, "", ocr.BackendOllama, cfg.MaxConcurrent, 5*time.Minute)
@@ -81,6 +99,7 @@ func New(cfg *config.Config) *Server {
 
 	os.MkdirAll(filepath.Join(cfg.DataDir, "vector_store"), 0755)
 	s.rag = rag.NewManager(filepath.Join(cfg.DataDir, "vector_store"))
+	s.setupRouters(srvCtx)
 
 	maxCases := cfg.MaxCases
 	if maxCases < 1 {
@@ -109,7 +128,10 @@ func New(cfg *config.Config) *Server {
 	})
 	s.workerPool = wp
 
-	s.workflow.CreateCase("ClientX", "Commercial Lease Dispute", "Demo", "")
+	// Only seed the demo case when the store is empty (prevents duplicates on restart)
+	if existing := s.workflow.ListCases(); len(existing) == 0 {
+		s.workflow.CreateCase("ClientX", "Commercial Lease Dispute", "Demo", "")
+	}
 
 	s.setupRoutes()
 	return s
@@ -126,7 +148,78 @@ func (s *Server) BatchProcessor() *processor.BatchProcessor {
 	return s.processor
 }
 
+func (s *Server) setupRouters(ctx context.Context) {
+	if s.cfg.EmbedRouterEnabled {
+		s.embedMgr = embedserver.New(embedserver.Config{
+			Python:    s.cfg.EmbedServerPython,
+			Script:    s.cfg.EmbedServerScript,
+			Model:     s.cfg.EmbedModel,
+			Port:      s.cfg.EmbedServerPort,
+			Host:      s.cfg.EmbedServerHost,
+			LogPrefix: "[embed]",
+		})
+		if err := s.embedMgr.Start(ctx); err != nil {
+			log.Printf("[embed] start failed: %v", err)
+		}
+		if enabled, _ := s.embedMgr.Status()["enabled"].(bool); enabled {
+			emb := embedrouter.NewOllamaEmbedder(s.embedMgr.BaseURL(), s.cfg.EmbedModel)
+			s.embedRouter = embedrouter.New(emb)
+			if s.embedMgr.Ready() {
+				llmutil.SetMatterRouter(embedrouter.New(emb))
+				s.rag.SetEmbedder(emb)
+			} else {
+				llmutil.SetMatterRouter(nil)
+				go s.enableDenseRAGWhenReady(ctx, emb)
+			}
+		} else {
+			llmutil.SetMatterRouter(nil)
+		}
+	} else {
+		llmutil.SetMatterRouter(nil)
+	}
+
+	if s.cfg.RouterEnabled {
+		s.routerMgr = mlxserver.New(mlxserver.Config{
+			Model:     s.cfg.RouterModel,
+			Port:      s.cfg.RouterPort,
+			LogPrefix: "[router]",
+		})
+		if err := s.routerMgr.Start(ctx); err != nil {
+			log.Printf("[router] start failed: %v", err)
+		}
+		s.router = llm.NewProvider(s.cfg.RouterModel, s.routerMgr.BaseURL(), "router-local", llm.BackendOpenAICompat)
+	}
+}
+
+func (s *Server) enableDenseRAGWhenReady(ctx context.Context, emb interface {
+	Embed(context.Context, []string) ([][]float32, error)
+}) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if s.embedMgr != nil && s.embedMgr.Ready() {
+			llmutil.SetMatterRouter(embedrouter.New(emb))
+			s.rag.SetEmbedder(emb)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 func (s *Server) Shutdown() {
+	if s.shutdownCancel != nil {
+		s.shutdownCancel()
+	}
+	if s.embedMgr != nil {
+		s.embedMgr.Stop()
+	}
+	if s.routerMgr != nil {
+		s.routerMgr.Stop()
+	}
 	if s.workerPool != nil {
 		s.workerPool.Shutdown()
 	}
@@ -140,6 +233,40 @@ func (s *Server) Shutdown() {
 	s.clientsMu.Unlock()
 
 	s.workflow.Close()
+}
+
+func (s *Server) embedRouterStatus() map[string]interface{} {
+	status := map[string]interface{}{
+		"enabled":       s.cfg.EmbedRouterEnabled && s.embedMgr != nil,
+		"ready":         false,
+		"model":         s.cfg.EmbedModel,
+		"base_url":      "",
+		"corpus_loaded": false,
+	}
+	if s.embedMgr != nil {
+		for k, v := range s.embedMgr.Status() {
+			status[k] = v
+		}
+	}
+	s.embedReadyMu.Lock()
+	status["corpus_loaded"] = s.embedReady
+	s.embedReadyMu.Unlock()
+	return status
+}
+
+func (s *Server) routerStatus() map[string]interface{} {
+	status := map[string]interface{}{
+		"enabled":  s.cfg.RouterEnabled && s.routerMgr != nil,
+		"ready":    false,
+		"model":    s.cfg.RouterModel,
+		"base_url": "",
+	}
+	if s.routerMgr != nil {
+		for k, v := range s.routerMgr.Status() {
+			status[k] = v
+		}
+	}
+	return status
 }
 
 func (s *Server) wsWriteJSON(conn *websocket.Conn, v interface{}) error {
@@ -164,24 +291,29 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/v1/status", s.handleStatus)
 	s.mux.HandleFunc("/ws", s.handleWebSocket)
+	s.mux.HandleFunc("/v1/agent/chat", s.handleAgentChat)
 	s.mux.HandleFunc("/v1/cases", s.handleListCases)
 	s.mux.HandleFunc("/v1/cases/create", s.handleCreateCase)
+	s.mux.HandleFunc("/v1/intake/folder/stream", s.handleIntakeFolderStream)
+	s.mux.HandleFunc("/v1/intake/folder/quick", s.handleIntakeQuick)
+	s.mux.HandleFunc("/v1/intake/folder/commit", s.handleIntakeCommit)
+	s.mux.HandleFunc("/v1/intake/folder", s.handleIntakeFolder)
 	s.mux.HandleFunc("/v1/upload/directory", s.handleUploadDirectory)
 	s.mux.HandleFunc("/v1/upload/batch", s.handleUploadBatch)
 	s.mux.HandleFunc("/v1/upload", s.handleUpload)
 	s.mux.HandleFunc("/v1/rag/search", s.handleSearch)
 	s.mux.HandleFunc("/v1/rag/summary", s.handleRAGSummary)
 	s.mux.HandleFunc("/v1/documents", s.handleListDocuments)
+	s.mux.HandleFunc("/v1/document-types", s.handleDocumentTypesList)
 	s.mux.HandleFunc("/v1/device", s.handleDeviceStatus)
 	s.mux.HandleFunc("/api/models", s.handleListModels)
 	s.mux.HandleFunc("/api/models/benchmark", s.handleBenchmarkModel)
+	s.mux.HandleFunc("/v1/chat", s.handleChat)
 
 	// Prefix handlers LAST
 	s.mux.HandleFunc("/v1/jobs/", s.handleJobs)
 	s.mux.HandleFunc("/v1/cases/", s.handleCases)
 	s.mux.HandleFunc("/v1/documents/", s.handleDocuments)
-
-	s.mux.Handle("/", http.FileServer(http.Dir(resolveFrontendDir())))
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -282,10 +414,12 @@ func (s *Server) AnalyzeBatch(ctx context.Context, docs map[string]string) (proc
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	s.writeJSON(w, http.StatusOK, map[string]string{
-		"status":  "ok",
-		"version": "v2-go",
-		"uptime":  time.Since(s.startTime).String(),
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":       "ok",
+		"version":      "v2-go",
+		"uptime":       time.Since(s.startTime).String(),
+		"embed_router": s.embedRouterStatus(),
+		"router":       s.routerStatus(),
 	})
 }
 
@@ -345,11 +479,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Printf("WebSocket connected, total: %d", connCount)
 
 	cases := s.workflow.ListCases()
+	s.jobsMu.RLock()
+	initJobs := make([]model.Job, 0, len(s.jobs))
+	for _, j := range s.jobs {
+		initJobs = append(initJobs, *j)
+	}
+	s.jobsMu.RUnlock()
 	data := map[string]interface{}{
 		"type":       "status_update",
 		"cases":      cases,
 		"case_count": len(cases),
 		"rag":        s.rag.GetSummary(),
+		"jobs":       initJobs,
 	}
 	if err := s.wsWriteJSON(conn, data); err != nil {
 		log.Printf("WebSocket initial write: %v", err)
@@ -462,23 +603,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRAGSummary(w http.ResponseWriter, r *http.Request) {
 	summary := s.rag.GetSummary()
 	s.writeJSON(w, http.StatusOK, summary)
-}
-
-// resolveFrontendDir finds the frontend directory whether running from source or .app bundle.
-func resolveFrontendDir() string {
-	if exe, err := os.Executable(); err == nil {
-		// macOS .app bundle: binary is at Contents/MacOS/agentflow, frontend at Contents/Resources/frontend
-		bundleFrontend := filepath.Join(filepath.Dir(exe), "..", "Resources", "frontend")
-		if fi, err := os.Stat(bundleFrontend); err == nil && fi.IsDir() {
-			return bundleFrontend
-		}
-	}
-	for _, dir := range []string{"frontend-v2", "frontend"} {
-		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
-			return dir
-		}
-	}
-	return "frontend"
 }
 
 func (s *Server) handleDeviceStatus(w http.ResponseWriter, r *http.Request) {

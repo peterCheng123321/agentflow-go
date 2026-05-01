@@ -21,8 +21,8 @@ import (
 type Backend string
 
 const (
-	BackendOllama        Backend = "ollama"
-	BackendOpenAICompat  Backend = "openai_compat" // Alibaba DashScope compatible-mode, OpenAI-style /chat/completions
+	BackendOllama       Backend = "ollama"
+	BackendOpenAICompat Backend = "openai_compat" // Alibaba DashScope compatible-mode, OpenAI-style /chat/completions
 )
 
 type Provider struct {
@@ -75,7 +75,7 @@ func NewProvider(modelName, baseURL, apiKey string, backend Backend, opts ...Opt
 		maxRetries: 3,
 		ttl:        30 * time.Minute,
 		client: &http.Client{
-			Timeout:   300 * time.Second,
+			Timeout: 300 * time.Second,
 			Transport: &http.Transport{
 				MaxIdleConns:        10,
 				MaxIdleConnsPerHost: 5,
@@ -185,6 +185,125 @@ func (p *Provider) Generate(prompt, context string, config GenerationConfig) (st
 	return p.generateUncached(prompt, context, config)
 }
 
+// Classify sends a short system+user chat request and returns the assistant
+// text. It is used for router labels and low-latency conversational replies.
+func (p *Provider) Classify(ctx context.Context, systemPrompt, userMessage string, maxTokens int) (string, error) {
+	if maxTokens <= 0 {
+		maxTokens = 32
+	}
+	messages := []map[string]string{
+		{"role": "system", "content": systemPrompt},
+		{"role": "user", "content": userMessage},
+	}
+
+	switch p.backend {
+	case BackendOpenAICompat:
+		payload := map[string]interface{}{
+			"model":       p.modelName,
+			"messages":    messages,
+			"max_tokens":  maxTokens,
+			"temperature": 0,
+		}
+		return p.doClassifyOpenAICompat(ctx, payload)
+	default:
+		payload := map[string]interface{}{
+			"model":    p.modelName,
+			"messages": messages,
+			"stream":   false,
+			"options": map[string]interface{}{
+				"num_predict": maxTokens,
+				"temperature": 0,
+			},
+		}
+		return p.doClassifyOllama(ctx, payload)
+	}
+}
+
+func (p *Provider) doClassifyOpenAICompat(ctx context.Context, payload map[string]interface{}) (string, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewBuffer(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("classify %d: %s", resp.StatusCode, string(body))
+	}
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("classify parse: %w (body: %.200q)", err, string(body))
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("classify returned no choices: %s", string(body))
+	}
+	out := polishAssistantResponse(parsed.Choices[0].Message.Content)
+	if strings.TrimSpace(out) == "" {
+		return "", fmt.Errorf("classify returned empty content")
+	}
+	return out, nil
+}
+
+func (p *Provider) doClassifyOllama(ctx context.Context, payload map[string]interface{}) (string, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/api/chat", bytes.NewBuffer(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("classify %d: %s", resp.StatusCode, string(body))
+	}
+	var parsed struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("classify parse: %w (body: %.200q)", err, string(body))
+	}
+	out := polishAssistantResponse(parsed.Message.Content)
+	if strings.TrimSpace(out) == "" {
+		return "", fmt.Errorf("classify returned empty content")
+	}
+	return out, nil
+}
+
 func (p *Provider) generateUncached(prompt, context string, config GenerationConfig) (string, error) {
 	switch p.backend {
 	case BackendOpenAICompat:
@@ -215,7 +334,7 @@ func (p *Provider) generateUncached(prompt, context string, config GenerationCon
 			"num_predict": config.MaxTokens,
 			"temperature": config.Temp,
 			// Mirostat sampling for faster, more consistent responses
-			"mirostat":    2,
+			"mirostat":     2,
 			"mirostat_tau": 5.0,
 			"mirostat_eta": 0.1,
 		},
@@ -345,42 +464,42 @@ func (p *Provider) doGenerateOllama(payload map[string]interface{}) (string, err
 	if err != nil {
 		return "", fmt.Errorf("marshal failed: %w", err)
 	}
-	
+
 	req, err := http.NewRequest("POST", p.baseURL+"/api/chat", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("request creation failed: %w", err)
 	}
-	
+
 	req.Header.Set("Content-Type", "application/json")
 	if p.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
-	
+
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read response failed: %w", err)
 	}
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
-	
+
 	var result struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	}
-	
+
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("unmarshal failed: %w", err)
 	}
-	
+
 	return result.Message.Content, nil
 }
 
@@ -389,12 +508,12 @@ func (p *Provider) GenerateJSON(prompt, context string, config GenerationConfig,
 	if err != nil {
 		return defaultResult, err
 	}
-	
+
 	var parsed interface{}
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
 		return defaultResult, fmt.Errorf("JSON parse failed: %w", err)
 	}
-	
+
 	return parsed, nil
 }
 
@@ -459,17 +578,17 @@ func (p *Provider) generateWithContext(ctx context.Context, prompt, contextStr s
 
 func (p *Provider) Stats() map[string]interface{} {
 	out := map[string]interface{}{
-		"model":          p.modelName,
-		"base_url":       p.baseURL,
-		"backend":        string(p.backend),
-		"is_ready":       p.isReady,
-		"req_count":      p.reqCount.Load(),
-		"err_count":      p.errCount.Load(),
-		"last_used":      p.lastUsed.Format(time.RFC3339),
-		"max_retries":    p.maxRetries,
-		"cache_enabled":  p.disk != nil,
-		"cache_hits":     p.cacheHits.Load(),
-		"cache_misses":   p.cacheMisses.Load(),
+		"model":         p.modelName,
+		"base_url":      p.baseURL,
+		"backend":       string(p.backend),
+		"is_ready":      p.isReady,
+		"req_count":     p.reqCount.Load(),
+		"err_count":     p.errCount.Load(),
+		"last_used":     p.lastUsed.Format(time.RFC3339),
+		"max_retries":   p.maxRetries,
+		"cache_enabled": p.disk != nil,
+		"cache_hits":    p.cacheHits.Load(),
+		"cache_misses":  p.cacheMisses.Load(),
 	}
 	if p.disk != nil {
 		out["cache_dir"] = p.disk.dir

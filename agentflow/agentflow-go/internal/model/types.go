@@ -3,26 +3,27 @@ package model
 import "time"
 
 type Case struct {
-	CaseID             string                 `json:"case_id"`
-	ClientName         string                 `json:"client_name"`
-	MatterType         string                 `json:"matter_type"`
-	SourceChannel      string                 `json:"source_channel"`
-	InitialMsg         string                 `json:"initial_msg"`
-	State              string                 `json:"state"`
-	Notes              []Note                 `json:"notes"`
-	UploadedDocuments  []string               `json:"uploaded_documents"`
-	CreatedAt          time.Time              `json:"created_at"`
-	UpdatedAt          time.Time              `json:"updated_at"`
-	Evaluation         string                 `json:"evaluation,omitempty"`
-	EvaluationDetail   map[string]interface{} `json:"evaluation_detail,omitempty"`
-	DocumentDraft      map[string]interface{} `json:"document_draft,omitempty"`
-	DraftPreview       string                 `json:"draft_preview,omitempty"`
-	Highlights         []Highlight            `json:"highlights,omitempty"`
-	HITLApprovals      map[string]bool        `json:"hitl_approvals,omitempty"`
-	AICaseSummary      string                 `json:"ai_case_summary,omitempty"`
-	AIFileSummaries    []map[string]interface{} `json:"ai_file_summaries,omitempty"`
-	IsPaid             bool                   `json:"is_paid"`
-	NodeHistory        []string               `json:"node_history"`
+	CaseID            string                   `json:"case_id"`
+	ClientName        string                   `json:"client_name"`
+	MatterType        string                   `json:"matter_type"`
+	SourceChannel     string                   `json:"source_channel"`
+	InitialMsg        string                   `json:"initial_msg"`
+	State             string                   `json:"state"`
+	Notes             []Note                   `json:"notes"`
+	UploadedDocuments []string                 `json:"uploaded_documents"`
+	GeneratedDocs     []GeneratedDoc           `json:"generated_docs,omitempty"`
+	CreatedAt         time.Time                `json:"created_at"`
+	UpdatedAt         time.Time                `json:"updated_at"`
+	Evaluation        string                   `json:"evaluation,omitempty"`
+	EvaluationDetail  map[string]interface{}   `json:"evaluation_detail,omitempty"`
+	DocumentDraft     map[string]interface{}   `json:"document_draft,omitempty"`
+	DraftPreview      string                   `json:"draft_preview,omitempty"`
+	Highlights        []Highlight              `json:"highlights,omitempty"`
+	HITLApprovals     map[string]bool          `json:"hitl_approvals,omitempty"`
+	AICaseSummary     string                   `json:"ai_case_summary,omitempty"`
+	AIFileSummaries   []map[string]interface{} `json:"ai_file_summaries,omitempty"`
+	IsPaid            bool                     `json:"is_paid"`
+	NodeHistory       []string                 `json:"node_history"`
 }
 
 type Note struct {
@@ -39,6 +40,36 @@ type Highlight struct {
 	SourcePage *int   `json:"source_page,omitempty"`
 }
 
+type GeneratedDoc struct {
+	ID               string         `json:"id"`
+	DocType          string         `json:"doc_type"`
+	Title            string         `json:"title"`
+	Status           string         `json:"status"`
+	Version          int            `json:"version"`
+	Sections         []DocSection   `json:"sections"`
+	Highlights       []DocHighlight `json:"highlights,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+	ApprovedAt       *time.Time     `json:"approved_at,omitempty"`
+	ExportedAt       *time.Time     `json:"exported_at,omitempty"`
+	ExportedFilename string         `json:"exported_filename,omitempty"`
+}
+
+type DocSection struct {
+	ID         string         `json:"id"`
+	Title      string         `json:"title"`
+	Content    string         `json:"content"`
+	Highlights []DocHighlight `json:"highlights,omitempty"`
+}
+
+type DocHighlight struct {
+	Text       string `json:"text"`
+	Reason     string `json:"reason"`
+	Category   string `json:"category"`
+	SourceFile string `json:"source_file,omitempty"`
+	SourceRef  string `json:"source_ref,omitempty"`
+}
+
 type SearchResult struct {
 	Filename  string  `json:"filename"`
 	Chunk     string  `json:"chunk"`
@@ -47,17 +78,17 @@ type SearchResult struct {
 }
 
 type DocumentRecord struct {
-	Filename         string                 `json:"filename"`
-	Path             string                 `json:"path"`
-	FileType         string                 `json:"file_type"`
-	FileSizeBytes    int64                  `json:"file_size_bytes"`
-	Chunks           []string               `json:"chunks"`
-	PageTexts        []string               `json:"page_texts,omitempty"`
-	TaggedChunks     []TaggedChunk          `json:"tagged_chunks,omitempty"`
-	PDFMetadata      map[string]interface{} `json:"pdf_metadata,omitempty"`
-	UserPreferences  map[string]string      `json:"user_preferences,omitempty"`
-	AIMetadata       map[string]interface{} `json:"ai_metadata,omitempty"`
-	IngestedAt       time.Time              `json:"ingested_at"`
+	Filename        string                 `json:"filename"`
+	Path            string                 `json:"path"`
+	FileType        string                 `json:"file_type"`
+	FileSizeBytes   int64                  `json:"file_size_bytes"`
+	Chunks          []string               `json:"chunks"`
+	PageTexts       []string               `json:"page_texts,omitempty"`
+	TaggedChunks    []TaggedChunk          `json:"tagged_chunks,omitempty"`
+	PDFMetadata     map[string]interface{} `json:"pdf_metadata,omitempty"`
+	UserPreferences map[string]string      `json:"user_preferences,omitempty"`
+	AIMetadata      map[string]interface{} `json:"ai_metadata,omitempty"`
+	IngestedAt      time.Time              `json:"ingested_at"`
 }
 
 type TaggedChunk struct {
@@ -66,10 +97,10 @@ type TaggedChunk struct {
 }
 
 type ToolResult struct {
-	Success  bool                   `json:"success"`
-	Error    string                 `json:"error,omitempty"`
-	Output   map[string]interface{} `json:"output,omitempty"`
-	LatencyMs float64               `json:"latency_ms"`
+	Success   bool                   `json:"success"`
+	Error     string                 `json:"error,omitempty"`
+	Output    map[string]interface{} `json:"output,omitempty"`
+	LatencyMs float64                `json:"latency_ms"`
 }
 
 type OrchestrationResult struct {
