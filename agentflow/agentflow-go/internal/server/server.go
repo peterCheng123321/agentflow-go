@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,9 +70,7 @@ func New(cfg *config.Config) *Server {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			CheckOrigin:     checkWSOrigin(os.Getenv("AGENTFLOW_ALLOW_ORIGINS")),
 		},
 	}
 	srvCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -639,4 +638,36 @@ func (s *Server) handleDeviceStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.writeJSON(w, http.StatusOK, out)
+}
+
+// checkWSOrigin returns a websocket.Upgrader CheckOrigin func that only
+// permits same-origin/loopback connections by default. If allowList is
+// non-empty (comma-separated origins from AGENTFLOW_ALLOW_ORIGINS), those
+// origins are also permitted. Requests without an Origin header (non-browser
+// clients) are allowed.
+func checkWSOrigin(allowList string) func(*http.Request) bool {
+	extra := map[string]struct{}{}
+	for _, o := range strings.Split(allowList, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			extra[o] = struct{}{}
+		}
+	}
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil || u.Host == "" {
+			return false
+		}
+		host := u.Hostname()
+		if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+			return true
+		}
+		if _, ok := extra[origin]; ok {
+			return true
+		}
+		return false
+	}
 }
