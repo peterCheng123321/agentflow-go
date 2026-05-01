@@ -179,6 +179,7 @@ func deepCopyCase(c *model.Case) model.Case {
 	out := *c
 	out.Notes = append([]model.Note(nil), c.Notes...)
 	out.UploadedDocuments = append([]string(nil), c.UploadedDocuments...)
+	out.GeneratedDocs = cloneGeneratedDocs(c.GeneratedDocs)
 	out.NodeHistory = append([]string(nil), c.NodeHistory...)
 	out.Highlights = append([]model.Highlight(nil), c.Highlights...)
 	if c.HITLApprovals != nil {
@@ -201,6 +202,22 @@ func deepCopyCase(c *model.Case) model.Case {
 		for k, v := range c.DocumentDraft {
 			out.DocumentDraft[k] = v
 		}
+	}
+	return out
+}
+
+func cloneGeneratedDocs(in []model.GeneratedDoc) []model.GeneratedDoc {
+	if in == nil {
+		return nil
+	}
+	out := make([]model.GeneratedDoc, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].Sections = append([]model.DocSection(nil), in[i].Sections...)
+		for j := range out[i].Sections {
+			out[i].Sections[j].Highlights = append([]model.DocHighlight(nil), in[i].Sections[j].Highlights...)
+		}
+		out[i].Highlights = append([]model.DocHighlight(nil), in[i].Highlights...)
 	}
 	return out
 }
@@ -509,6 +526,131 @@ func (e *Engine) SetAICaseSummary(caseID, summary string) error {
 	}
 
 	return nil
+}
+
+func (e *Engine) AppendGeneratedDoc(caseID string, doc model.GeneratedDoc) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	c, ok := e.cases[caseID]
+	if !ok {
+		return 0, fmt.Errorf("case not found")
+	}
+	version := 1
+	for _, existing := range c.GeneratedDocs {
+		if existing.DocType == doc.DocType && existing.Version >= version {
+			version = existing.Version + 1
+		}
+	}
+	now := time.Now()
+	if doc.CreatedAt.IsZero() {
+		doc.CreatedAt = now
+	}
+	doc.UpdatedAt = now
+	if doc.Status == "" {
+		doc.Status = "draft"
+	}
+	doc.Version = version
+	c.GeneratedDocs = append(c.GeneratedDocs, doc)
+	c.UpdatedAt = now
+	c.Notes = append(c.Notes, model.Note{
+		Text:      fmt.Sprintf("Generated document draft: %s v%d", doc.DocType, version),
+		Timestamp: now,
+	})
+	e.persistCaseLocked(c)
+	if e.onChange != nil {
+		go e.onChange()
+	}
+	return version, nil
+}
+
+func (e *Engine) UpdateGeneratedDocStatus(caseID, docID, status string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	c, ok := e.cases[caseID]
+	if !ok {
+		return fmt.Errorf("case not found")
+	}
+	now := time.Now()
+	for i := range c.GeneratedDocs {
+		if c.GeneratedDocs[i].ID != docID {
+			continue
+		}
+		c.GeneratedDocs[i].Status = status
+		c.GeneratedDocs[i].UpdatedAt = now
+		if status == "approved" {
+			c.GeneratedDocs[i].ApprovedAt = &now
+		}
+		c.UpdatedAt = now
+		e.persistCaseLocked(c)
+		if e.onChange != nil {
+			go e.onChange()
+		}
+		return nil
+	}
+	return fmt.Errorf("generated doc not found")
+}
+
+func (e *Engine) MarkGeneratedDocExported(caseID, docID, filename string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	c, ok := e.cases[caseID]
+	if !ok {
+		return fmt.Errorf("case not found")
+	}
+	now := time.Now()
+	for i := range c.GeneratedDocs {
+		if c.GeneratedDocs[i].ID != docID {
+			continue
+		}
+		c.GeneratedDocs[i].Status = "exported"
+		c.GeneratedDocs[i].ExportedFilename = filename
+		c.GeneratedDocs[i].ExportedAt = &now
+		c.GeneratedDocs[i].UpdatedAt = now
+		c.UpdatedAt = now
+		e.persistCaseLocked(c)
+		if e.onChange != nil {
+			go e.onChange()
+		}
+		return nil
+	}
+	return fmt.Errorf("generated doc not found")
+}
+
+func (e *Engine) UpdateGeneratedDocSection(caseID, docID, sectionID, content string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	c, ok := e.cases[caseID]
+	if !ok {
+		return fmt.Errorf("case not found")
+	}
+	now := time.Now()
+	for i := range c.GeneratedDocs {
+		if c.GeneratedDocs[i].ID != docID {
+			continue
+		}
+		if c.GeneratedDocs[i].Status != "draft" {
+			return fmt.Errorf("only draft status is editable")
+		}
+		for j := range c.GeneratedDocs[i].Sections {
+			if c.GeneratedDocs[i].Sections[j].ID != sectionID {
+				continue
+			}
+			c.GeneratedDocs[i].Sections[j].Content = content
+			c.GeneratedDocs[i].UpdatedAt = now
+			c.UpdatedAt = now
+			e.persistCaseLocked(c)
+			if e.onChange != nil {
+				go e.onChange()
+			}
+			return nil
+		}
+		return fmt.Errorf("section not found")
+	}
+	return fmt.Errorf("generated doc not found")
 }
 
 func (e *Engine) UpdateCase(caseID, clientName, matterType string) error {

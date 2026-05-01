@@ -1,33 +1,36 @@
-# Binaries
-agentflow-go
-agentflow-go-new
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Data directory (uploaded files, secrets, vector store)
-data/
-
-# Logs
-server.log
-*.log
-
-# macOS
+.venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
 .DS_Store
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
+# Local build outputs
+/agentflow-serve
+/agentflow-go-bin
+/serve
+/main
+/filetest
+agentflow/agentflow-go/agentflow-serve
+agentflow/agentflow-go/agentflow-bin*
+agentflow/agentflow-go/dist/
+agentflow/agentflow-go/.pytest_cache/
+agentflow/agentflow-go/tests/__pycache__/
+agentflow/agentflow-go/tests/reports/
+frontend/node_modules/
+frontend/dist/
+AgentFlowUI/.build/
+dist/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+# Cached binaries that shouldn't be in git
+data/.llm_prompt_cache*.safetensors
+data/tracking/usage.db
 
-# Temp files
-*.tmp
-*.bak
+# Secrets — keep locally, never commit
+data/secrets/
+**/secrets/
+**/*_api_key.txt
+**/*.pem

@@ -199,6 +199,10 @@ func InferIntakeFromOCR(provider *llm.Provider, text, logicalName string) (clien
 
 // AnalyzeBatchFromOCR runs a batch LLM analysis across multiple documents.
 func AnalyzeBatchFromOCR(provider *llm.Provider, docs map[string]string) BatchAnalysisJSON {
+	return AnalyzeBatchFromOCRWithModel(provider, "qwen-plus", "", docs)
+}
+
+func AnalyzeBatchFromOCRWithModel(provider *llm.Provider, modelName, folderName string, docs map[string]string) BatchAnalysisJSON {
 	var out BatchAnalysisJSON
 	out.ClientName = "Unknown Client"
 	out.MatterType = "Civil Litigation"
@@ -214,6 +218,9 @@ func AnalyzeBatchFromOCR(provider *llm.Provider, docs map[string]string) BatchAn
 	sort.Strings(names)
 
 	var ctxBuilder strings.Builder
+	if strings.TrimSpace(folderName) != "" {
+		ctxBuilder.WriteString(fmt.Sprintf("Folder hint: %s\n\n", strings.TrimSpace(folderName)))
+	}
 	for _, name := range names {
 		text := docs[name]
 		if !IntakeTextUsable(text) {
@@ -249,7 +256,7 @@ func AnalyzeBatchFromOCR(provider *llm.Provider, docs map[string]string) BatchAn
 	raw, err := provider.Generate(prompt, ctx, llm.GenerationConfig{
 		MaxTokens: 2048,
 		Temp:      0.1,
-		Model:     "qwen-plus",
+		Model:     modelName,
 	})
 	if err != nil {
 		log.Printf("[batch-analyze] LLM: %v", err)
@@ -272,8 +279,67 @@ func AnalyzeBatchFromOCR(provider *llm.Provider, docs map[string]string) BatchAn
 	return out
 }
 
+func QuickIntakeFromFilenames(provider *llm.Provider, modelName, folderName string, filenames []string) BatchAnalysisJSON {
+	var out BatchAnalysisJSON
+	out.ClientName = "Unknown Client"
+	out.MatterType = "Civil Litigation"
+	if len(filenames) == 0 {
+		return out
+	}
+
+	names := append([]string(nil), filenames...)
+	sort.Strings(names)
+	for _, name := range names {
+		if label, margin, ok := extractMatterByEmbed(name); ok && margin >= MatterMargin {
+			out.MatterType = label
+			break
+		}
+		if out.MatterType == "Civil Litigation" {
+			out.MatterType = ExtractMatterType(name)
+		}
+	}
+
+	prompt := `你是中国法律材料快速归档助手。只根据文件夹名称和文件名，提取案件初始元数据。
+禁止编造姓名；如果无法从文件夹名或文件名判断委托人/原告，client_name 填 "Unknown Client"。
+matter_type 必须从下列英文短语选一：Civil Litigation, Contract Dispute, Sales Contract Dispute, Debt Dispute, Loan Dispute, Lease Dispute, Labor Dispute, Commercial Lease Dispute。
+输出严格 JSON：
+{
+  "client_name": "Unknown Client",
+  "matter_type": "Civil Litigation",
+  "plaintiffs": [],
+  "defendants": []
+}`
+	ctx := fmt.Sprintf("Folder: %s\nFiles:\n- %s", strings.TrimSpace(folderName), strings.Join(names, "\n- "))
+	raw, err := provider.Generate(prompt, ctx, llm.GenerationConfig{
+		MaxTokens: 512,
+		Temp:      0.05,
+		Model:     modelName,
+	})
+	if err != nil {
+		out.LLMError = err.Error()
+		return out
+	}
+	payload := ExtractJSONObject(raw)
+	if err := json.Unmarshal([]byte(payload), &out); err != nil {
+		out.LLMError = err.Error()
+	}
+	if out.ClientName == "" {
+		out.ClientName = "Unknown Client"
+	}
+	if m := CanonicalMatter(out.MatterType); m != "" {
+		out.MatterType = m
+	} else {
+		out.MatterType = "Civil Litigation"
+	}
+	return out
+}
+
 // ExtractMatterType guesses matter type from filename keywords.
 func ExtractMatterType(filename string) string {
+	if label, margin, ok := extractMatterByEmbed(filename); ok && margin >= MatterMargin {
+		log.Printf("[matter-router] %q -> %s (margin %.3f)", filename, label, margin)
+		return label
+	}
 	type hint struct {
 		keyword string
 		matter  string
