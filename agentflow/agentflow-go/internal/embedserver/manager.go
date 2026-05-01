@@ -63,13 +63,27 @@ func New(cfg Config) *Manager {
 		cfg.Script = os.Getenv("AGENTFLOW_EMBED_SERVER_SCRIPT")
 	}
 	if cfg.Script == "" {
-		// Try the conventional location relative to the running binary's
-		// working directory. Production callers should pass an explicit
-		// absolute path.
-		cwd, _ := os.Getwd()
-		guess := filepath.Join(cwd, "scripts", "mlx_embed_server.py")
-		if _, err := os.Stat(guess); err == nil {
-			cfg.Script = guess
+		// Search candidate locations in order: the running .app bundle's
+		// Resources/ dir (production), then ./scripts/ relative to cwd (dev),
+		// then $REPO_ROOT/agentflow-go/scripts/ (developer convenience).
+		var candidates []string
+		if exe, err := os.Executable(); err == nil {
+			// /Applications/AgentFlow.app/Contents/MacOS/agentflow-serve
+			//   → /Applications/AgentFlow.app/Contents/Resources/mlx_embed_server.py
+			candidates = append(candidates,
+				filepath.Join(filepath.Dir(exe), "..", "Resources", "mlx_embed_server.py"))
+		}
+		if cwd, err := os.Getwd(); err == nil {
+			candidates = append(candidates,
+				filepath.Join(cwd, "scripts", "mlx_embed_server.py"))
+			candidates = append(candidates,
+				filepath.Join(cwd, "agentflow-go", "scripts", "mlx_embed_server.py"))
+		}
+		for _, p := range candidates {
+			if _, err := os.Stat(p); err == nil {
+				cfg.Script = p
+				break
+			}
 		}
 	}
 	return &Manager{cfg: cfg}
