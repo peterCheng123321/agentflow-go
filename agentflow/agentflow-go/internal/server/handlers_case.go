@@ -55,6 +55,10 @@ func (s *Server) handleCases(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(parts) >= 3 {
 			next := parts[2]
+			if next == "list" && len(parts) == 3 && r.Method == http.MethodGet {
+				s.handleListCaseDocuments(w, r, caseID)
+				return
+			}
 			if next == "generate" || strings.HasPrefix(next, "gen-") {
 				s.handleDocumentsRoutes(w, r, caseID, parts[2:])
 				return

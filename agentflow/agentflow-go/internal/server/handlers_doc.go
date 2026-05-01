@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func unescapeURLPathSegment(s string) string {
@@ -209,4 +210,70 @@ func (s *Server) resolveDocDiskPath(name string) (string, bool) {
 	}
 
 	return "", false
+}
+
+// caseDocumentMeta is the per-file payload returned from
+// GET /v1/cases/{id}/documents/list.
+type caseDocumentMeta struct {
+	Filename   string `json:"filename"`
+	Doctype    string `json:"doctype"`
+	OCRIndexed bool   `json:"ocr_indexed"`
+	RAGIndexed bool   `json:"rag_indexed"`
+	SizeBytes  int64  `json:"size_bytes"`
+	ModifiedAt string `json:"modified_at"`
+}
+
+// handleListCaseDocuments returns the file-attachment metadata table for a case.
+// Failures stat'ing an individual file are non-fatal — the entry is still
+// returned with size_bytes=0 and an empty modified_at so the UI can flag the
+// missing file rather than failing the whole listing.
+func (s *Server) handleListCaseDocuments(w http.ResponseWriter, r *http.Request, caseID string) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+
+	c, ok := s.workflow.GetCaseSnapshot(caseID)
+	if !ok {
+		s.writeError(w, http.StatusNotFound, "Case not found")
+		return
+	}
+
+	doctypes := make(map[string]string, len(c.AIFileSummaries))
+	for _, row := range c.AIFileSummaries {
+		fn, _ := row["filename"].(string)
+		if fn == "" {
+			continue
+		}
+		dt, _ := row["doctype"].(string)
+		doctypes[fn] = dt
+	}
+
+	out := make([]caseDocumentMeta, 0, len(c.UploadedDocuments))
+	for _, filename := range c.UploadedDocuments {
+		entry := caseDocumentMeta{
+			Filename: filename,
+			Doctype:  doctypes[filename],
+		}
+
+		if path, found := s.resolveDocDiskPath(filename); found {
+			if info, err := os.Stat(path); err == nil {
+				entry.SizeBytes = info.Size()
+				entry.ModifiedAt = info.ModTime().UTC().Format(time.RFC3339)
+			}
+			if s.ocrCache != nil {
+				if _, hit := s.ocrCache.Get(path); hit {
+					entry.OCRIndexed = true
+				}
+			}
+		}
+
+		if doc, ok := s.rag.GetDocumentFlex(filename); ok && len(doc.Chunks) > 0 {
+			entry.RAGIndexed = true
+		}
+
+		out = append(out, entry)
+	}
+
+	s.writeJSON(w, http.StatusOK, out)
 }
