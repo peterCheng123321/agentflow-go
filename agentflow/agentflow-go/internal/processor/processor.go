@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"agentflow-go/internal/llmutil"
 	"agentflow-go/internal/model"
 	"golang.org/x/sync/errgroup"
 )
@@ -275,9 +276,13 @@ func (p *BatchProcessor) ProcessBatch(ctx context.Context, jobID string, filePat
 
 				if targetCaseID != "" {
 					if s.classification != nil {
-						p.workflow.AttachDocument(targetCaseID, s.displayFilename, map[string]interface{}{
+						extras := map[string]interface{}{
 							"classification": s.classification,
-						})
+						}
+						if dt := llmutil.DoctypeFromClassification(s.classification); dt != "" {
+							extras["doctype"] = dt
+						}
+						p.workflow.AttachDocument(targetCaseID, s.displayFilename, extras)
 					} else {
 						p.workflow.AttachDocument(targetCaseID, s.displayFilename)
 					}
