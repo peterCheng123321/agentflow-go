@@ -1340,6 +1340,8 @@ func (s *Server) handleDocuments(w http.ResponseWriter, r *http.Request) {
 		s.handleDocumentContentByID(w, r, filename)
 	case "metadata":
 		s.handleDocumentMetadataByID(w, r, filename)
+	case "thumbnail":
+		s.handleDocumentThumbnailByID(w, r, filename)
 	default:
 		s.writeError(w, http.StatusNotFound, "Action not found")
 	}
