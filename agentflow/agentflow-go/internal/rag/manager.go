@@ -3,6 +3,7 @@ package rag
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"agentflow-go/internal/model"
+	"agentflow-go/internal/vec"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -276,17 +278,35 @@ func (m *Manager) Search(query string, k int) []model.SearchResult {
 	}
 	m.cacheMu.RUnlock()
 
+	// Snapshot the embedder under a brief read lock, then do the HTTP
+	// embed *without* holding m.mu — otherwise concurrent ingest/delete
+	// blocks for the duration of the network call.
+	m.mu.RLock()
+	emb := m.embedder
+	chunksEmbedded := len(m.chunkEmbeddings) > 0 && len(m.chunkEmbeddings) == len(m.tokenizedCorpus)
+	m.mu.RUnlock()
+
+	var queryVec []float32
+	if emb != nil && chunksEmbedded {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		vecs, err := emb.Embed(ctx, []string{query})
+		cancel()
+		if err != nil {
+			log.Printf("[rag] dense embed failed: %v (falling back to BM25)", err)
+		} else if len(vecs) == 1 {
+			queryVec = vec.Normalize(vecs[0])
+		}
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	queryTokens := tokenize(query)
-	results := m.searchLocked(query, queryTokens, k)
+	results := m.scoreAndRank(queryTokens, queryVec, k)
 
-	// Cache results
 	m.cacheMu.Lock()
 	m.searchCache[query] = results
 	if len(m.searchCache) > 256 {
-		// Evict oldest
 		for key := range m.searchCache {
 			delete(m.searchCache, key)
 			break
@@ -297,15 +317,26 @@ func (m *Manager) Search(query string, k int) []model.SearchResult {
 	return results
 }
 
-func (m *Manager) searchLocked(query string, queryTokens []string, k int) []model.SearchResult {
+// scoreAndRank assumes m.mu is held. queryVec may be nil when dense is
+// unavailable; in that case it falls back to BM25-only ranking.
+func (m *Manager) scoreAndRank(queryTokens []string, queryVec []float32, k int) []model.SearchResult {
 	bm25Scores := m.bm25Scores(queryTokens)
 	if len(bm25Scores) == 0 {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	denseScores := m.embedQueryAndScore(ctx, query)
+	var denseScores []float64
+	if queryVec != nil && len(m.chunkEmbeddings) == len(m.tokenizedCorpus) {
+		denseScores = make([]float64, len(m.chunkEmbeddings))
+		for i, v := range m.chunkEmbeddings {
+			if len(v) != len(queryVec) {
+				denseScores[i] = -1
+				continue
+			}
+			denseScores[i] = vec.Dot(queryVec, v)
+		}
+	}
+
 	if len(denseScores) == 0 {
 		return m.resultsFromScores(bm25Scores, k, "bm25")
 	}
