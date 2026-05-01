@@ -1,52 +1,39 @@
-# LegalCaseAgent CRM
+# AgentFlow
 
-Local-first legal intake CRM with dynamic case handling, lightweight document retrieval, and a pluggable WeChat connector.
+A legal-operations Mac app for Chinese-language legal workflows. Native SwiftUI frontend, Go backend, cloud LLMs (DashScope `qwen-plus`) for synthesis, with a local MLX embedding model spine for routing and retrieval.
 
-## Main Docs
+## Architecture
 
-- Final installation guide: `INSTALLATION.md`
-- Sandbox notes: `openclaw_sandbox/README.md`
+The SwiftUI app spawns a bundled `agentflow-serve` Go process. The Go process supervises an MLX embedding sidecar (Python). The sidecar runs `mlx-community/multilingual-e5-small-mlx` and serves at port 8095. Intent classification, dense RAG, and matter-type inference all use the embedding model; cloud LLM calls go to DashScope for actual generation.
 
-## Main Commands
+Default ports: 8000 (Go API), 8090 (legacy LLM router, opt-in), 8095 (embedding sidecar).
 
-Bootstrap:
+## Repo layout
 
-```bash
-bash scripts/bootstrap_safe_stack.sh
+| Path | Purpose |
+| --- | --- |
+| `agentflow-go/` | Go HTTP server + supervisors + tests |
+| `agentflow-go/scripts/mlx_embed_server.py` | Python embedding sidecar |
+| `agentflow-go/tests/` | pytest suite + `MANUAL_TESTS.md` checklist |
+| `AgentFlowUI/` | SwiftUI Mac app |
+| `data/` | runtime data (cases, vector store, OCR cache); ignored by git |
+| `docs/legacy/` | pre-Go documentation (historical only) |
+
+## Setup / run
+
+Requires Apple Silicon, Python 3.12+, Go 1.22+, and a DashScope API key at `~/Library/Application Support/AgentFlow/secrets/dashscope_api_key.txt`.
+
+```
+pip3 install mlx-embeddings mlx-lm
+cd agentflow-go && go build -o agentflow-serve ./cmd
+# The Mac app at /Applications/AgentFlow.app spawns this binary automatically.
+# For dev: ./agentflow-serve & open /Applications/AgentFlow.app
 ```
 
-Configure WeChat Official Account:
+## Tests
 
-```bash
-bash scripts/configure_wechat_official_account.sh
+```
+cd agentflow-go && pytest tests/
 ```
 
-Start backend:
-
-```bash
-bash scripts/start_backend.sh
-```
-
-Start full local stack:
-
-```bash
-bash scripts/start_local_stack.sh
-```
-
-Cleanup:
-
-```bash
-bash scripts/uninstall_safe_stack.sh
-```
-
-## What Works
-
-- dynamic cases
-- CRM frontend
-- lightweight local RAG
-- OpenClaw runtime detection by CLI
-- WeChat read/send/group/RAG-signal app contract
-
-## Important
-
-The remaining production step is connecting your real WeChat Official Account credentials and public webhook to the installed OpenClaw runtime.
+~23 tests, ~45s, covering local routing and DashScope-backed E2E flows. Manual checklist at `agentflow-go/tests/MANUAL_TESTS.md`.
