@@ -14,6 +14,11 @@ let package = Package(
             swiftSettings: [
                 .unsafeFlags(["-framework", "AppKit"])
             ]
+        ),
+        .testTarget(
+            name: "AgentFlowTests",
+            dependencies: ["AgentFlowUI"],
+            path: "Tests/AgentFlowTests"
         )
     ]
 )
