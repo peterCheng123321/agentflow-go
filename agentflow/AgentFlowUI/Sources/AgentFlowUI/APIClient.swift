@@ -201,6 +201,37 @@ final class APIClient: ObservableObject {
         return base.appendingPathComponent("v1/documents/\(enc)/view")
     }
 
+    /// GET /v1/cases/{id}/documents/list — per-file metadata for the matter.
+    func listDocumentInfo(caseID: String) async throws -> [DocumentInfo] {
+        struct Resp: Decodable { let documents: [DocumentInfo]? }
+        var req = URLRequest(url: base.appendingPathComponent("v1/cases/\(caseID)/documents/list"))
+        req.timeoutInterval = 30
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try check(resp, data: data)
+        // Tolerate either a bare array or {"documents": [...]} envelope.
+        if let arr = try? decoder.decode([DocumentInfo].self, from: data) { return arr }
+        return (try decoder.decode(Resp.self, from: data)).documents ?? []
+    }
+
+    /// GET /v1/documents/{name}/thumbnail?size=128 — returns PNG bytes.
+    /// Caller wraps in NSImage / SwiftUI Image as needed.
+    func documentThumbnail(filename: String, size: Int = 128) async throws -> Data {
+        var req = URLRequest(url: documentThumbnailURL(filename: filename, size: size))
+        req.timeoutInterval = 30
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try check(resp, data: data)
+        return data
+    }
+
+    /// Convenience URL builder for AsyncImage callers.
+    func documentThumbnailURL(filename: String, size: Int = 128) -> URL {
+        let enc = filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filename
+        var comps = URLComponents(url: base.appendingPathComponent("v1/documents/\(enc)/thumbnail"),
+                                  resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "size", value: String(size))]
+        return comps.url!
+    }
+
     // MARK: - Jobs
 
     struct JobStatus: Decodable {
