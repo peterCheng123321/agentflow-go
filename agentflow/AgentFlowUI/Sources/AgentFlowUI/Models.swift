@@ -131,3 +131,16 @@ enum WorkflowGuidance {
         }
     }
 }
+
+// MARK: - Document metadata
+
+/// Per-file metadata returned by `/v1/cases/{id}/documents/list`.
+struct DocumentInfo: Codable, Identifiable, Hashable {
+    var id: String { filename }
+    let filename: String
+    let doctype: String?       // backend slug; nil/empty when unknown
+    let ocr_indexed: Bool?
+    let rag_indexed: Bool?
+    let size_bytes: Int64?
+    let modified_at: Date?
+}
