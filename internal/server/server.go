@@ -168,8 +168,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/v1/jobs/", s.handleJobs)
 	s.mux.HandleFunc("/v1/cases/", s.handleCases)
 	s.mux.HandleFunc("/v1/documents/", s.handleDocuments)
-
-	s.mux.Handle("/", http.FileServer(http.Dir("./frontend")))
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, data interface{}) {
