@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
 
 	"agentflow-go/internal/model"
+	"agentflow-go/internal/vec"
 )
 
 // embedder is the minimal interface this package needs from the global
@@ -45,35 +45,6 @@ func (m *Manager) SetEmbedder(e embedder) {
 	if needMigration && e != nil {
 		go m.backfillEmbeddings()
 	}
-}
-
-// embedQueryAndScore embeds the query and returns dense cosine scores per
-// chunk, in the same order as m.tokenizedCorpus / m.chunkEmbeddings.
-// Returns nil if embedder isn't ready or any embeddings are missing.
-func (m *Manager) embedQueryAndScore(ctx context.Context, query string) []float64 {
-	if m.embedder == nil || len(m.chunkEmbeddings) == 0 {
-		return nil
-	}
-	if len(m.chunkEmbeddings) != len(m.tokenizedCorpus) {
-		// Chunk count mismatch — migration in progress. Skip dense for
-		// this query; BM25 still works alone.
-		return nil
-	}
-	vecs, err := m.embedder.Embed(ctx, []string{query})
-	if err != nil || len(vecs) != 1 {
-		log.Printf("[rag] dense embed failed: %v (falling back to BM25)", err)
-		return nil
-	}
-	q := normalizeF32(vecs[0])
-	scores := make([]float64, len(m.chunkEmbeddings))
-	for i, v := range m.chunkEmbeddings {
-		if len(v) == 0 || len(v) != len(q) {
-			scores[i] = -1 // sentinel: missing or wrong-dim → effectively no match
-			continue
-		}
-		scores[i] = dotF32(q, v)
-	}
-	return scores
 }
 
 // rrfFuse combines a BM25 ranking and a dense ranking via Reciprocal Rank
@@ -236,7 +207,7 @@ func (m *Manager) backfillEmbeddings() {
 			break
 		}
 		if p.globalIdx < len(m.chunkEmbeddings) && len(m.chunkEmbeddings[p.globalIdx]) == 0 {
-			m.chunkEmbeddings[p.globalIdx] = normalizeF32(vecs[i])
+			m.chunkEmbeddings[p.globalIdx] = vec.Normalize(vecs[i])
 			filled++
 		}
 	}
@@ -376,28 +347,3 @@ func (m *Manager) saveEmbeddings() {
 	}
 }
 
-// ---------------- math helpers ----------------
-
-func dotF32(a, b []float32) float64 {
-	var s float64
-	for i := range a {
-		s += float64(a[i]) * float64(b[i])
-	}
-	return s
-}
-
-func normalizeF32(v []float32) []float32 {
-	var ss float64
-	for _, x := range v {
-		ss += float64(x) * float64(x)
-	}
-	if ss == 0 {
-		return v
-	}
-	inv := float32(1.0 / math.Sqrt(ss))
-	out := make([]float32, len(v))
-	for i, x := range v {
-		out[i] = x * inv
-	}
-	return out
-}

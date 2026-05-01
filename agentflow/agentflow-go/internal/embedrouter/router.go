@@ -14,9 +14,10 @@ package embedrouter
 import (
 	"context"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
+
+	"agentflow-go/internal/vec"
 )
 
 // Embedder is the interface this package needs from any embedding model.
@@ -84,7 +85,7 @@ func (r *Router) Init(ctx context.Context, corpus []LabeledUtterance) error {
 		if len(vecs[i]) != dim {
 			return fmt.Errorf("vector %d has dim %d, expected %d", i, len(vecs[i]), dim)
 		}
-		refs[i] = Reference{Label: u.Label, Utterance: u.Utterance, Vec: normalize(vecs[i])}
+		refs[i] = Reference{Label: u.Label, Utterance: u.Utterance, Vec: vec.Normalize(vecs[i])}
 	}
 	r.refs = refs
 	return nil
@@ -108,7 +109,7 @@ func (r *Router) Classify(ctx context.Context, query string) (Result, error) {
 	if len(vecs) != 1 {
 		return Result{}, fmt.Errorf("embedder returned %d vectors for 1 query", len(vecs))
 	}
-	qv := normalize(vecs[0])
+	qv := vec.Normalize(vecs[0])
 
 	// Score every reference. Vectors are L2-normalized so dot product
 	// equals cosine similarity.
@@ -118,7 +119,7 @@ func (r *Router) Classify(ctx context.Context, query string) (Result, error) {
 	}
 	all := make([]scored, len(r.refs))
 	for i, ref := range r.refs {
-		all[i] = scored{ref: ref, score: dot(qv, ref.Vec)}
+		all[i] = scored{ref: ref, score: vec.Dot(qv, ref.Vec)}
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].score > all[j].score })
 
@@ -143,26 +144,3 @@ func (r *Router) Classify(ctx context.Context, query string) (Result, error) {
 	}, nil
 }
 
-func dot(a, b []float32) float64 {
-	var s float64
-	for i := range a {
-		s += float64(a[i]) * float64(b[i])
-	}
-	return s
-}
-
-func normalize(v []float32) []float32 {
-	var ss float64
-	for _, x := range v {
-		ss += float64(x) * float64(x)
-	}
-	if ss == 0 {
-		return v
-	}
-	inv := float32(1.0 / math.Sqrt(ss))
-	out := make([]float32, len(v))
-	for i, x := range v {
-		out[i] = x * inv
-	}
-	return out
-}

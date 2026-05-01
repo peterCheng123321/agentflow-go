@@ -8,6 +8,7 @@
 package mlxserver
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -193,40 +194,13 @@ func (m *Manager) waitForReady(ctx context.Context) {
 }
 
 func forwardLog(prefix string, r io.Reader) {
-	buf := make([]byte, 4096)
-	carry := []byte{}
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			carry = append(carry, buf[:n]...)
-			for {
-				idx := indexByte(carry, '\n')
-				if idx < 0 {
-					break
-				}
-				line := carry[:idx]
-				carry = carry[idx+1:]
-				if len(line) > 0 {
-					log.Printf("%s %s", prefix, string(line))
-				}
-			}
-		}
-		if err != nil {
-			if len(carry) > 0 {
-				log.Printf("%s %s", prefix, string(carry))
-			}
-			return
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	for scanner.Scan() {
+		if line := scanner.Text(); line != "" {
+			log.Printf("%s %s", prefix, line)
 		}
 	}
-}
-
-func indexByte(b []byte, c byte) int {
-	for i, v := range b {
-		if v == c {
-			return i
-		}
-	}
-	return -1
 }
 
 // Ready reports whether the local server is currently serving requests.
