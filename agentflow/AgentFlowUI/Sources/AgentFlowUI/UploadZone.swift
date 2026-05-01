@@ -8,9 +8,14 @@ struct UploadZone: View {
     let caseID: String?
     var onDone: () async -> Void
 
-    @State private var hovering = false
+    @State private var isDragHover: Bool = false
     @State private var jobs: [UploadJob] = []
     @State private var error: String?
+
+    // Paste-folder-path fallback (Sequoia sandbox quirk: pasting absolute paths always works).
+    @State private var showPastePath: Bool = false
+    @State private var pastedPath: String = ""
+    @State private var pasteError: String?
 
     struct UploadJob: Identifiable, Equatable {
         let id = UUID()
@@ -28,11 +33,11 @@ struct UploadZone: View {
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.up.doc.fill")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(hovering ? AF.Palette.tint(.blue) : .secondary)
+                        .foregroundStyle(isDragHover ? AF.Palette.tint(.blue) : .secondary)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Drop files or click to upload")
+                        Text(isDragHover ? "Release to upload" : "Drop files or click to upload")
                             .font(.callout.weight(.medium))
-                            .foregroundStyle(hovering ? .primary : .secondary)
+                            .foregroundStyle(isDragHover ? .primary : .secondary)
                         Text("PDF, images, text, DOCX, ZIP")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -40,28 +45,37 @@ struct UploadZone: View {
                     Spacer()
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 18))
-                        .foregroundStyle(hovering ? AF.Palette.tint(.blue) : .secondary)
+                        .foregroundStyle(isDragHover ? AF.Palette.tint(.blue) : .secondary)
                 }
                 .padding(.horizontal, AF.Space.m)
                 .padding(.vertical, AF.Space.s)
                 .background(
                     RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
-                        .fill(hovering ? AF.Palette.tint(.blue).opacity(0.08) : Color.black.opacity(0.15))
+                        .fill(isDragHover
+                              ? AF.Palette.tint(.blue).opacity(0.05)
+                              : Color.black.opacity(0.15))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
                         .strokeBorder(
-                            hovering ? AF.Palette.tint(.blue).opacity(0.60) : Color.white.opacity(0.10),
-                            style: StrokeStyle(lineWidth: 1, dash: hovering ? [] : [5, 4])
+                            isDragHover ? AF.Palette.tint(.blue) : Color.white.opacity(0.10),
+                            style: StrokeStyle(lineWidth: 1, dash: isDragHover ? [] : [5, 4])
                         )
                 )
-                .animation(.easeOut(duration: 0.15), value: hovering)
+                .animation(.easeOut(duration: 0.15), value: isDragHover)
             }
             .buttonStyle(.plain)
-            .onDrop(of: [.fileURL], isTargeted: $hovering) { providers in
+            .onDrop(of: [.fileURL], isTargeted: Binding(
+                get: { isDragHover },
+                set: { newValue in
+                    withAnimation(.spring(duration: 0.2)) { isDragHover = newValue }
+                }
+            )) { providers in
                 handleDrop(providers: providers)
                 return true
             }
+
+            pastePathRow
 
             if !jobs.isEmpty {
                 VStack(spacing: 6) {
@@ -98,6 +112,32 @@ struct UploadZone: View {
         }
     }
 
+    @ViewBuilder private var pastePathRow: some View {
+        VStack(alignment: .leading, spacing: AF.Space.xxs) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    showPastePath.toggle()
+                    if !showPastePath { pasteError = nil }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: showPastePath ? "chevron.down" : "chevron.right").font(.caption2)
+                    Text("Paste folder path…").font(.caption)
+                }.foregroundStyle(.secondary)
+            }.buttonStyle(.plain)
+            if showPastePath {
+                HStack(spacing: AF.Space.xs) {
+                    TextField("/absolute/path/to/folder", text: $pastedPath, onCommit: submitPastedPath)
+                        .textFieldStyle(.roundedBorder).font(.caption)
+                    Button("Submit", action: submitPastedPath)
+                        .controlSize(.small)
+                        .disabled(pastedPath.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                if let pe = pasteError { Text(pe).font(.caption).foregroundStyle(.red) }
+            }
+        }
+    }
+
     @ViewBuilder private func iconFor(_ j: UploadJob) -> some View {
         switch j.status {
         case .uploading, .processing:
@@ -124,6 +164,39 @@ struct UploadZone: View {
                     upload(url: url)
                 }
             }
+        }
+    }
+
+    private func submitPastedPath() {
+        let trimmed = pastedPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir)
+        guard exists, isDir.boolValue else {
+            pasteError = "Not a directory: \(expanded)"
+            return
+        }
+        pasteError = nil
+        uploadDirectory(path: URL(fileURLWithPath: expanded))
+        pastedPath = ""
+        showPastePath = false
+    }
+
+    /// Uploads every regular file in the directory (non-recursive).
+    private func uploadDirectory(path: URL) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: path,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            pasteError = "Could not read directory contents"
+            return
+        }
+        for url in entries {
+            let isFile = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
+            if isFile { upload(url: url) }
         }
     }
 
