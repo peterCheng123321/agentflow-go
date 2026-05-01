@@ -18,11 +18,12 @@ macos-app: build
 	SWIFT_BIN=$$(cd "$(AGENTFLOW_UI)" && swift build -c release --show-bin-path)/AgentFlowUI; \
 	test -f "$$SWIFT_BIN" || (echo "Swift build did not produce AgentFlowUI"; exit 1); \
 	rm -rf "$(DIST)/$(APP)"; \
-	mkdir -p "$(DIST)/$(APP)/Contents/MacOS"; \
+	mkdir -p "$(DIST)/$(APP)/Contents/MacOS" "$(DIST)/$(APP)/Contents/Resources"; \
 	cp "$(BINARY)" "$(DIST)/$(APP)/Contents/MacOS/$(BINARY)"; \
 	cp "$$SWIFT_BIN" "$(DIST)/$(APP)/Contents/MacOS/AgentFlowUI"; \
 	chmod +x "$(DIST)/$(APP)/Contents/MacOS/AgentFlowUI"; \
 	cp packaging/macos/Info.plist "$(DIST)/$(APP)/Contents/Info.plist"; \
+	cp scripts/mlx_embed_server.py "$(DIST)/$(APP)/Contents/Resources/mlx_embed_server.py"; \
 	codesign -s - --force --deep "$(DIST)/$(APP)" 2>/dev/null || true; \
 	echo ""; \
 	echo "Built $(DIST)/$(APP)"; \
