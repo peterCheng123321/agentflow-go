@@ -4,20 +4,6 @@ import Foundation
 
 struct CasesResponse: Decodable {
     let cases: [Case]
-    let count: Int
-}
-
-struct StatusResponse: Decodable {
-    let cases: [Case]?
-    let count: Int?
-    let rag: RAGSummary?
-    let websocket_clients: Int?
-}
-
-struct RAGSummary: Decodable {
-    let document_count: Int?
-    let chunk_count: Int?
-    let tokenized: Bool?
 }
 
 // MARK: - Domain
@@ -33,10 +19,6 @@ struct Case: Decodable, Identifiable, Hashable {
     let uploaded_documents: [String]?
     let created_at: Date
     let updated_at: Date
-    let evaluation: String?
-    let hitl_approvals: [String: Bool]?
-    let is_paid: Bool
-    let node_history: [String]?
 
     var id: String { case_id }
 

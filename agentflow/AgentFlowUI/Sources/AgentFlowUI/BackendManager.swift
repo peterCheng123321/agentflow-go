@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 
 @MainActor
 final class BackendManager: ObservableObject {
@@ -100,11 +99,6 @@ final class BackendManager: ObservableObject {
             try? await Task.sleep(nanoseconds: 700_000_000)
             launch()
         }
-    }
-
-    func stop() {
-        process?.terminate()
-        process = nil
     }
 
     private func ping() async -> Bool {
