@@ -27,6 +27,20 @@ enum AF {
         static let xl: CGFloat = 20
     }
 
+    // Motion tokens. Curated curves rather than ad-hoc `.easeInOut`s
+    // sprinkled across views — gives the app a single, recognisable feel.
+    //
+    // - `quick` for state flips and button feedback (~150ms)
+    // - `smooth` for general view transitions (~300ms, cubic ease)
+    // - `springSnappy` for short interactive nudges (selection, taps)
+    // - `springFlow`  for longer cross-view morphs (sheets, sidebar→detail)
+    enum Motion {
+        static let quick:        Animation = .easeOut(duration: 0.15)
+        static let smooth:       Animation = .smooth(duration: 0.32)
+        static let springSnappy: Animation = .spring(response: 0.32, dampingFraction: 0.78)
+        static let springFlow:   Animation = .spring(response: 0.55, dampingFraction: 0.86)
+    }
+
     // System-semantic colours. No hard-coded RGB for chrome surfaces —
     // everything here tracks light/dark mode and accessibility contrast.
     enum Palette {
@@ -83,6 +97,30 @@ extension View {
             .regular,
             in: RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
         )
+    }
+
+    /// Hover-lift treatment for a Liquid Glass card that responds to the
+    /// pointer. Subtle vertical lift + accent-tinted shadow when hovered;
+    /// returns to rest with `Motion.smooth`. Use on tappable surfaces
+    /// (case rows, doc tiles) where a click target should feel alive.
+    func afInteractiveCard() -> some View {
+        modifier(InteractiveCardModifier())
+    }
+}
+
+private struct InteractiveCardModifier: ViewModifier {
+    @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isHovered ? 1.012 : 1.0)
+            .shadow(
+                color: Color.accentColor.opacity(isHovered ? 0.18 : 0),
+                radius: isHovered ? 12 : 0,
+                y: isHovered ? 4 : 0
+            )
+            .animation(AF.Motion.smooth, value: isHovered)
+            .onHover { isHovered = $0 }
     }
 }
 
@@ -147,7 +185,13 @@ struct StatePill: View {
 // MARK: - Button styles
 
 /// Prominent call-to-action filled with the system accent colour.
+/// Press feedback: scales 0.97 + dims, snaps back via `Motion.springSnappy`.
+/// Hover: elevates with a softened accent shadow so the click target reads
+/// as "live" — works inside Liquid Glass without competing with the
+/// material's own depth.
 struct AFPrimaryButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.callout.weight(.semibold))
@@ -158,12 +202,25 @@ struct AFPrimaryButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
                     .fill(Color.accentColor)
             )
-            .opacity(configuration.isPressed ? 0.8 : 1)
+            .shadow(
+                color: Color.accentColor.opacity(isHovered ? 0.38 : 0.18),
+                radius: isHovered ? 10 : 4,
+                y: isHovered ? 4 : 1
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : (isHovered ? 1.015 : 1.0))
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(AF.Motion.springSnappy, value: configuration.isPressed)
+            .animation(AF.Motion.smooth, value: isHovered)
+            .onHover { isHovered = $0 }
     }
 }
 
-/// Secondary action rendered on a Liquid Glass panel.
+/// Secondary action rendered on a Liquid Glass panel. Lighter feedback
+/// than the primary — small scale + opacity dip on press, gentle glow
+/// on hover so the surface feels live but doesn't shout.
 struct AFGhostButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.callout.weight(.medium))
@@ -171,7 +228,15 @@ struct AFGhostButtonStyle: ButtonStyle {
             .padding(.vertical, AF.Space.xs)
             .foregroundStyle(.primary)
             .afGlassPanel()
-            .opacity(configuration.isPressed ? 0.75 : 1)
+            .overlay(
+                RoundedRectangle(cornerRadius: AF.Radius.m, style: .continuous)
+                    .stroke(Color.accentColor.opacity(isHovered ? 0.55 : 0), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .opacity(configuration.isPressed ? 0.78 : 1)
+            .animation(AF.Motion.springSnappy, value: configuration.isPressed)
+            .animation(AF.Motion.smooth, value: isHovered)
+            .onHover { isHovered = $0 }
     }
 }
 
@@ -223,21 +288,36 @@ struct EmptyStateView: View {
     let title: String
     let subtitle: String
 
+    @State private var appeared = false
+
     var body: some View {
         VStack(spacing: AF.Space.s) {
             Image(systemName: icon)
                 .font(.system(size: 40, weight: .regular))
                 .foregroundStyle(.secondary)
+                .symbolEffect(.bounce.up.byLayer, options: .nonRepeating, value: appeared)
                 .padding(.bottom, AF.Space.xs)
+                .opacity(appeared ? 1 : 0)
+                .offset(y: appeared ? 0 : 8)
             Text(title)
                 .font(.headline)
+                .opacity(appeared ? 1 : 0)
+                .offset(y: appeared ? 0 : 8)
             Text(subtitle)
                 .font(.callout)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 360)
+                .opacity(appeared ? 1 : 0)
+                .offset(y: appeared ? 0 : 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(AF.Space.l)
+        .onAppear {
+            // Stagger the three lines via implicit animation. The
+            // delay-cascade keeps the entrance feeling intentional rather
+            // than a single hard fade.
+            withAnimation(AF.Motion.springFlow.delay(0.05))           { appeared = true }
+        }
     }
 }

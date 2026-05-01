@@ -40,6 +40,12 @@ struct ContentView: View {
                         .id(c.case_id)
                         .navigationTitle(c.displayName)
                         .navigationSubtitle(c.matter_type)
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity.combined(with: .move(edge: .trailing)),
+                                removal:   .opacity.combined(with: .move(edge: .leading))
+                            )
+                        )
                 } else {
                     EmptyStateView(
                         icon: "briefcase",
@@ -47,9 +53,13 @@ struct ContentView: View {
                         subtitle: "Choose a client file from the list, or create a new matter to begin."
                     )
                     .navigationTitle("AgentFlow")
+                    .transition(.opacity)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Spring the detail-pane swap so case→case feels like a swipe
+            // rather than a hard cut. Empty-state crossfades for calm.
+            .animation(AF.Motion.springFlow, value: selection)
         }
         .task { await loadCases() }
         .onChange(of: selection) { _, new in

@@ -81,23 +81,36 @@ struct SidebarView: View {
         }
     }
 
+    @State private var refreshTick = 0
+    @State private var sparkleTick = 0
+
     private var footerBar: some View {
         HStack(spacing: AF.Space.s) {
-            Circle()
-                .fill(backendColor)
-                .frame(width: 8, height: 8)
+            BackendStatusDot(color: backendColor, pulsing: backend.status == .starting)
+                .animation(AF.Motion.smooth, value: backend.status)
             Text(backendLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .contentTransition(.opacity)
+                .animation(AF.Motion.smooth, value: backendLabel)
             Spacer()
-            Button { Task { await onRefresh() } } label: {
+
+            Button {
+                refreshTick &+= 1
+                Task { await onRefresh() }
+            } label: {
                 Image(systemName: "arrow.clockwise")
+                    .symbolEffect(.rotate.byLayer, options: .nonRepeating, value: refreshTick)
             }
             .buttonStyle(.borderless)
             .help("Refresh")
 
-            Button(action: onOpenResearch) {
+            Button {
+                sparkleTick &+= 1
+                onOpenResearch()
+            } label: {
                 Image(systemName: "sparkles")
+                    .symbolEffect(.bounce.up.byLayer, options: .nonRepeating, value: sparkleTick)
             }
             .buttonStyle(.borderless)
             .help("Open research for selected matter")
@@ -134,6 +147,38 @@ struct SidebarView: View {
         case .starting: return .orange
         case .running:  return .green
         case .failed:   return .red
+        }
+    }
+}
+
+/// Backend liveness indicator. When the engine is still starting we ring
+/// the dot with a soft outward pulse so the user gets passive feedback
+/// that something is in motion (vs a static dot that reads as "stuck").
+private struct BackendStatusDot: View {
+    let color: Color
+    let pulsing: Bool
+
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(color.opacity(0.55), lineWidth: 2)
+                .scaleEffect(pulsing ? 1.0 + phase : 1.0)
+                .opacity(pulsing ? max(0, 0.55 - phase * 0.55) : 0)
+                .frame(width: 8, height: 8)
+                .onAppear { startPulseIfNeeded() }
+                .onChange(of: pulsing) { _, _ in startPulseIfNeeded() }
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+        }
+    }
+
+    private func startPulseIfNeeded() {
+        guard pulsing else { phase = 0; return }
+        withAnimation(.easeOut(duration: 1.2).repeatForever(autoreverses: false)) {
+            phase = 1
         }
     }
 }
