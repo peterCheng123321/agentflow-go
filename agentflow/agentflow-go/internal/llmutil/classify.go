@@ -70,6 +70,16 @@ func BuildClassificationPrompt(logicalName string) string {
 材料来源标签（不得单独作为分类依据）：` + logicalName
 }
 
+// DoctypeFromClassification returns the canonical document_type slug from a
+// classification map produced by ClassifyDocument, or "" if absent.
+func DoctypeFromClassification(cls map[string]interface{}) string {
+	if cls == nil {
+		return ""
+	}
+	dt, _ := cls["document_type"].(string)
+	return dt
+}
+
 func CanonicalDocumentType(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {

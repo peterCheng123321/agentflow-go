@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"agentflow-go/internal/llmutil"
 	"agentflow-go/internal/model"
 	"agentflow-go/internal/processor"
 )
@@ -131,9 +132,13 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if classification != nil {
-			s.workflow.AttachDocument(finalCaseID, logicalName, map[string]interface{}{
+			extras := map[string]interface{}{
 				"classification": classification,
-			})
+			}
+			if dt := llmutil.DoctypeFromClassification(classification); dt != "" {
+				extras["doctype"] = dt
+			}
+			s.workflow.AttachDocument(finalCaseID, logicalName, extras)
 		} else {
 			s.workflow.AttachDocument(finalCaseID, logicalName)
 		}
